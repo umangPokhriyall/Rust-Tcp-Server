@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Rust Progressive Server</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>🚀 Rust Progressive Web Server</h1>
+        <p>Built by Umang Pokhriyal</p>
+    </header>
+
+    <section class="card">
+        <h2>Server Info</h2>
+        <ul>
+            <li>Architecture: <span id="arch">Single Threaded</span></li>
+            <li>Status: <span class="online">Online</span></li>
+            <li>Language: Rust</li>
+        </ul>
+    </section>
+
+    <section class="card">
+        <h2>Load Test Area</h2>
+        <p>Click the button multiple times to generate concurrent requests.</p>
+        <button onclick="sendRequests()">Generate 20 Requests</button>
+        <div id="result"></div>
+    </section>
+
+    <footer>
+        <p>Progressive Server Architecture Learning Project</p>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>

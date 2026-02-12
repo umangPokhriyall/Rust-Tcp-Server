@@ -20,8 +20,9 @@ fn main() {
 
     // let pool = ThreadPool::new(4);
 
-    for stream in listner.incoming().take(8) {
+    for stream in listner.incoming() {
         let stream = stream.unwrap();
+        println!("Stream {:?}", stream);
 
         let index = index_html.clone();
         let not_found = not_found_html.clone();

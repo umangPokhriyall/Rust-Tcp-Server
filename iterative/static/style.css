@@ -1,0 +1,82 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+    background: linear-gradient(135deg, #1e1e2f, #2b5876);
+    color: white;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+header {
+    margin-top: 40px;
+    text-align: center;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+}
+
+.card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    padding: 25px;
+    margin: 20px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.card h2 {
+    margin-bottom: 15px;
+}
+
+ul {
+    list-style: none;
+}
+
+li {
+    margin-bottom: 8px;
+}
+
+.online {
+    color: #00ff99;
+    font-weight: bold;
+}
+
+button {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    background: #ff7a18;
+    background: linear-gradient(to right, #ff7a18, #ff512f);
+    color: white;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+button:hover {
+    transform: scale(1.05);
+    opacity: 0.9;
+}
+
+#result {
+    margin-top: 15px;
+    font-size: 0.9rem;
+}
+
+footer {
+    margin-top: auto;
+    padding: 20px;
+    font-size: 0.8rem;
+    opacity: 0.7;
+}
