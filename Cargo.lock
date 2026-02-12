@@ -171,6 +171,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pre_fork"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
