@@ -39,10 +39,12 @@ fn main() -> Result<()> {
         let child_pid = fork()?;
 
         if child_pid == 0 {
+            drop(listener);
             router.route_client(client)?;
-            break;
+            std::process::exit(0);
         } else {
-            println!("[{pid}] forking process, new {child_pid}")
+            println!("[{pid}] forking process, new {child_pid}");
+            drop(client);
         }
     }
 
