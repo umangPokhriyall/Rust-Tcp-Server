@@ -9,5 +9,6 @@
 //! but first consumed by the models and the reactor in later Phase 1 sessions.
 #![allow(dead_code)]
 
+pub mod epoll;
 pub mod socket;
 pub mod syscall;
