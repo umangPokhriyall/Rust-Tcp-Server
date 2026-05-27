@@ -1,0 +1,9 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Phase 0 allowlist for `core`: socket2 only (used by `bind_listener` for
+# SO_REUSEPORT / SO_REUSEADDR in Session D). Nothing else.
+socket2 = "0.6"
