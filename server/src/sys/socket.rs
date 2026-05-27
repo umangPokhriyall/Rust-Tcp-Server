@@ -6,6 +6,7 @@ use std::io;
 use std::mem;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::RawFd;
+use std::time::Duration;
 
 use crate::sys::syscall::{cvt, syscall};
 
@@ -13,6 +14,26 @@ use crate::sys::syscall::{cvt, syscall};
 pub fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
     syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
+    Ok(())
+}
+
+/// Apply `SO_RCVTIMEO` to a listening socket so a *blocking* `accept` wakes
+/// every `timeout` (returning `WouldBlock`) instead of parking forever. This is
+/// what lets a blocking accept loop poll a shutdown flag: `std`'s `accept`
+/// retries `EINTR` internally, so a signal alone never unblocks it — only this
+/// receive timeout does.
+pub fn set_accept_timeout(fd: RawFd, timeout: Duration) -> io::Result<()> {
+    let tv = libc::timeval {
+        tv_sec: timeout.as_secs() as libc::time_t,
+        tv_usec: timeout.subsec_micros() as libc::suseconds_t,
+    };
+    syscall!(setsockopt(
+        fd,
+        libc::SOL_SOCKET,
+        libc::SO_RCVTIMEO,
+        &tv as *const libc::timeval as *const libc::c_void,
+        mem::size_of::<libc::timeval>() as libc::socklen_t,
+    ))?;
     Ok(())
 }
 
