@@ -5,6 +5,24 @@
 //! only errno-handling code in the layer — nothing below re-implements it.
 
 use std::io;
+use std::time::Duration;
+
+/// Convert a wait timeout to the millisecond `c_int` that `epoll_wait`/`poll`
+/// expect: `None` blocks forever (`-1`); a duration is rounded down to whole
+/// milliseconds and saturated at `c_int::MAX`.
+pub(crate) fn timeout_to_millis(timeout: Option<Duration>) -> libc::c_int {
+    match timeout {
+        None => -1,
+        Some(d) => {
+            let ms = d.as_millis();
+            if ms > libc::c_int::MAX as u128 {
+                libc::c_int::MAX
+            } else {
+                ms as libc::c_int
+            }
+        }
+    }
+}
 
 /// Integer return types whose error sentinel is `-1` (the libc convention).
 pub trait IsMinusOne {

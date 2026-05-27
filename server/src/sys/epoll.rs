@@ -8,7 +8,7 @@ use std::io;
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
-use crate::sys::syscall::syscall;
+use crate::sys::syscall::{syscall, timeout_to_millis};
 
 /// Which readiness an fd is registered for.
 #[derive(Clone, Copy)]
@@ -125,21 +125,6 @@ fn events_mask(interest: Interest, trigger: Trigger) -> u32 {
         mask |= libc::EPOLLET as u32;
     }
     mask
-}
-
-/// `epoll_wait`/`poll` take a millisecond `c_int`; `None` means block forever.
-fn timeout_to_millis(timeout: Option<Duration>) -> libc::c_int {
-    match timeout {
-        None => -1,
-        Some(d) => {
-            let ms = d.as_millis();
-            if ms > libc::c_int::MAX as u128 {
-                libc::c_int::MAX
-            } else {
-                ms as libc::c_int
-            }
-        }
-    }
 }
 
 #[cfg(test)]
