@@ -1,13 +1,8 @@
 [package]
 name = "server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-dhat = { version = "0.3", optional = true }
-
-[features]
-dhat-heap = ["dhat"]
-
-[profile.release]
-debug = true
+# Phase 0 allowlist for `server`: core + std only.
+core = { path = "../core" }
