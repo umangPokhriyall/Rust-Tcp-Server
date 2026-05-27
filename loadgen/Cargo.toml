@@ -1,0 +1,14 @@
+[package]
+name = "loadgen"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "loadgen"
+path = "src/main.rs"
+
+[dependencies]
+# Phase 1 allowlist for `loadgen`: hdrhistogram + std. Nothing else.
+# default-features = false drops the `sync` (crossbeam) and `serialization`
+# (flate2/base64) extras — the core Histogram API is all we use.
+hdrhistogram = { version = "7", default-features = false }
