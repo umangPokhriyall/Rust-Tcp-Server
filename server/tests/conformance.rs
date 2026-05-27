@@ -1,9 +1,14 @@
-//! Integration test: spawn the real `server` binary running the `iterative`
-//! model and drive it over raw TCP (std only — no external HTTP client).
+//! Parametrized conformance suite (§8). For each implemented model it spawns the
+//! real `server` binary and drives it over raw TCP (std only — no external HTTP
+//! client), asserting the common bar:
+//!   * 200 on `GET /`
+//!   * 404 on an unknown path
+//!   * 405 on a non-GET method
+//!   * keep-alive reuse (200, 404, 405 on one connection)
+//!   * 400 on a malformed request line, connection closed
+//!   * the server SURVIVES the malformed request and keeps serving
 //!
-//! Covers §12.4 / §12.5: a 200, a 404, a 400 on a malformed request, keep-alive
-//! reuse on a single connection, and that the server survives the malformed
-//! request and keeps serving.
+//! Each model session adds its model(s) to the parametrized list below.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -20,6 +25,8 @@ fn free_port() -> u16 {
 }
 
 /// Owns the spawned server process and kills it on drop, even if a test panics.
+/// `kill` sends SIGKILL to the parent; the process models set `PR_SET_PDEATHSIG`
+/// on their children, so workers/children die with the parent — no leaked procs.
 struct ServerGuard {
     child: Child,
     port: u16,
@@ -32,13 +39,13 @@ impl Drop for ServerGuard {
     }
 }
 
-fn spawn_server() -> ServerGuard {
+fn spawn_server(model: &str) -> ServerGuard {
     let port = free_port();
     let assets = format!("{}/assets", env!("CARGO_MANIFEST_DIR"));
     let child = Command::new(env!("CARGO_BIN_EXE_server"))
         .args([
             "--model",
-            "iterative",
+            model,
             "--port",
             &port.to_string(),
             "--assets-dir",
@@ -130,51 +137,82 @@ fn content_length(headers: &str) -> usize {
         .unwrap_or(0)
 }
 
-#[test]
-fn get_200_then_404_reuse_one_connection() {
-    let server = spawn_server();
+/// The full common bar for one model.
+fn run_conformance(model: &str) {
+    let server = spawn_server(model);
+
+    // --- One keep-alive connection carries three requests in sequence. ---
     let mut stream = connect(server.port);
 
-    // First request on the connection: index page -> 200.
+    // 1. GET / -> 200, keep-alive, served from the in-memory index asset.
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .unwrap();
     let resp = read_response(&mut stream);
-    assert_eq!(resp.status, 200, "headers:\n{}", resp.headers);
-    assert!(resp.headers.contains("Connection: keep-alive"));
+    assert_eq!(resp.status, 200, "[{model}] GET / headers:\n{}", resp.headers);
+    assert!(
+        resp.headers.contains("Connection: keep-alive"),
+        "[{model}] expected keep-alive:\n{}",
+        resp.headers
+    );
     assert!(
         resp.body.windows(8).any(|w| w == b"it works"),
-        "index body: {:?}",
+        "[{model}] index body: {:?}",
         String::from_utf8_lossy(&resp.body)
     );
 
-    // Second request on the SAME connection (keep-alive reuse): unknown -> 404.
+    // 2. SAME connection (keep-alive reuse): unknown path -> 404.
     stream
         .write_all(b"GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .unwrap();
     let resp = read_response(&mut stream);
-    assert_eq!(resp.status, 404, "headers:\n{}", resp.headers);
-}
+    assert_eq!(resp.status, 404, "[{model}] GET /missing headers:\n{}", resp.headers);
 
-#[test]
-fn malformed_request_returns_400_and_server_survives() {
-    let server = spawn_server();
+    // 3. SAME connection again: a non-GET method -> 405.
+    stream
+        .write_all(b"DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let resp = read_response(&mut stream);
+    assert_eq!(resp.status, 405, "[{model}] DELETE / headers:\n{}", resp.headers);
+    drop(stream);
 
-    // A malformed request line (only two tokens) -> 400, connection closed.
+    // --- A malformed request line -> 400, connection closed. ---
     {
         let mut bad = connect(server.port);
         bad.write_all(b"GET /\r\n\r\n").unwrap();
         let resp = read_response(&mut bad);
-        assert_eq!(resp.status, 400, "headers:\n{}", resp.headers);
-        assert!(resp.headers.contains("Connection: close"));
+        assert_eq!(resp.status, 400, "[{model}] malformed headers:\n{}", resp.headers);
+        assert!(
+            resp.headers.contains("Connection: close"),
+            "[{model}] malformed should close:\n{}",
+            resp.headers
+        );
     }
 
-    // The server must still be up: a fresh connection still serves 200.
+    // --- The server must have survived the bad request: a fresh 200. ---
     {
         let mut good = connect(server.port);
         good.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
             .unwrap();
         let resp = read_response(&mut good);
-        assert_eq!(resp.status, 200, "server did not survive the bad request");
+        assert_eq!(
+            resp.status, 200,
+            "[{model}] server did not survive the bad request"
+        );
     }
+}
+
+#[test]
+fn iterative_conformance() {
+    run_conformance("iterative");
+}
+
+#[test]
+fn forking_conformance() {
+    run_conformance("forking");
+}
+
+#[test]
+fn preforked_conformance() {
+    run_conformance("preforked");
 }
