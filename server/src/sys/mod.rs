@@ -12,5 +12,6 @@
 pub mod conn_table;
 pub mod epoll;
 pub mod poll;
+pub mod signal;
 pub mod socket;
 pub mod syscall;
