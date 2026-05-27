@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 # Phase 0 allowlist for `core`: socket2 only (used by `bind_listener` for
-# SO_REUSEPORT / SO_REUSEADDR in Session D). Nothing else.
-socket2 = "0.6"
+# SO_REUSEPORT / SO_REUSEADDR). The "all" feature exposes `set_reuse_port`.
+socket2 = { version = "0.6", features = ["all"] }
