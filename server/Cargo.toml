@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Phase 0 allowlist for `server`: core + std only.
+# Phase 1 allowlist for `server`: core, socket2, libc. Nothing else.
 core = { path = "../core" }
+# libc — fork, waitpid, epoll, poll, accept4, fcntl, signals (the `sys` layer).
+libc = "0.2"
