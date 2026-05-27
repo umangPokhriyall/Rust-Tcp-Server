@@ -216,3 +216,13 @@ fn forking_conformance() {
 fn preforked_conformance() {
     run_conformance("preforked");
 }
+
+#[test]
+fn thread_per_conn_conformance() {
+    run_conformance("thread-per-conn");
+}
+
+#[test]
+fn thread_pool_conformance() {
+    run_conformance("thread-pool");
+}
