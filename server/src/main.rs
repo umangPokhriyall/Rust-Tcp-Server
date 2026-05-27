@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use core::{App, Method, Request, Response, ServerConfig, StatusCode};
 
+use models::forking::Forking;
 use models::iterative::Iterative;
+use models::preforked::Preforked;
 
 struct Cli {
     model: String,
@@ -37,6 +39,8 @@ fn main() {
     // stops Phase 1 models from being reached before they exist.
     let server: Box<dyn core::Server> = match cli.model.as_str() {
         "iterative" => Box::new(Iterative::new(cli.verbose)),
+        "forking" => Box::new(Forking::new(cli.verbose)),
+        "preforked" => Box::new(Preforked::new(cli.verbose)),
         other => {
             eprintln!("model '{other}' not implemented yet");
             std::process::exit(1);

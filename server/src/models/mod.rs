@@ -1,6 +1,11 @@
-//! One module per concurrency model, each implementing `core::Server`.
+//! One module per concurrency model, each implementing `core::Server`, plus the
+//! shared blocking serve loop they reuse.
 //!
-//! Phase 0 wires only `iterative`. Other models belong to later phases — do not
-//! implement them here.
+//! Implemented so far: `iterative` (Phase 0), `forking`, `preforked`. The
+//! remaining models arrive in later Phase 1 sessions — do not implement them
+//! ahead of their session.
 
+pub mod blocking;
+pub mod forking;
 pub mod iterative;
+pub mod preforked;
