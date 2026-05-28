@@ -246,3 +246,8 @@ fn epoll_et_conformance() {
 fn event_loop_conformance() {
     run_conformance("event-loop");
 }
+
+#[test]
+fn multireactor_conformance() {
+    run_conformance("multireactor");
+}

@@ -15,6 +15,7 @@ pub mod event_io;
 pub mod event_loop;
 pub mod forking;
 pub mod iterative;
+pub mod multireactor;
 pub mod poll;
 pub mod preforked;
 pub mod thread_per_conn;

@@ -18,6 +18,7 @@ use models::epoll::{EpollEt, EpollLt};
 use models::event_loop::EventLoop;
 use models::forking::Forking;
 use models::iterative::Iterative;
+use models::multireactor::Multireactor;
 use models::poll::Poll;
 use models::preforked::Preforked;
 use models::thread_per_conn::ThreadPerConn;
@@ -55,8 +56,9 @@ fn main() {
         "epoll-lt" => Box::new(EpollLt::new(cli.verbose)),
         "epoll-et" => Box::new(EpollEt::new(cli.verbose)),
         "event-loop" => Box::new(EventLoop::new(cli.verbose)),
-        m @ ("multireactor" | "io-uring") => {
-            eprintln!("model '{m}' is Phase 2 — not implemented yet");
+        "multireactor" => Box::new(Multireactor::new(cli.verbose)),
+        "io-uring" => {
+            eprintln!("model 'io-uring' is Phase 2 session 2 — not implemented yet");
             std::process::exit(1);
         }
         other => {
