@@ -45,6 +45,8 @@ MODELS = [
     "epoll-lt",
     "epoll-et",
     "event-loop",
+    "multireactor",
+    "io-uring",
 ]
 
 # A distinguishable color per model. tab10 ordered so blocking models cluster
@@ -60,6 +62,8 @@ COLORS = {
     "epoll-lt":        "#ff7f0e",
     "epoll-et":        "#d62728",
     "event-loop":      "#e377c2",
+    "multireactor":    "#bcbd22",
+    "io-uring":        "#000000",
 }
 
 
@@ -191,6 +195,50 @@ def plot_metric_vs_concurrency(
     return out
 
 
+def plot_scaling(results_dir: Path) -> Path | None:
+    """Multireactor scaling-factor plot — throughput(W) / throughput(W=1)
+    against worker count W. Reads bench/results/multireactor_scaling.csv with
+    columns `workers,connections,rate,throughput_rps,p50,p99,p999`."""
+    path = results_dir / "multireactor_scaling.csv"
+    if not path.exists():
+        print(f"  {path} not found; skipping scaling plot", file=sys.stderr)
+        return None
+    rows = []
+    with path.open() as f:
+        for row in csv.DictReader(f):
+            try:
+                rows.append((int(row["workers"]),
+                             float(row["throughput_rps"]),
+                             int(row["p99"])))
+            except (KeyError, ValueError):
+                continue
+    if not rows:
+        return None
+    rows.sort()
+    base = next((tp for (w, tp, _) in rows if w == 1), rows[0][1])
+    if base <= 0:
+        base = rows[0][1] or 1.0
+    workers = [w for (w, _, _) in rows]
+    factor = [tp / base for (_, tp, _) in rows]
+    ideal = workers
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    ax.plot(workers, factor, marker="o", linewidth=1.6,
+            color="#bcbd22", label="multireactor (measured)")
+    ax.plot(workers, ideal, linestyle="--", linewidth=1.0,
+            color="#888888", label="ideal (= workers)")
+    ax.set_xlabel("workers (pinned reactors)")
+    ax.set_ylabel("scaling factor (throughput(W) / throughput(1))")
+    ax.set_title("multireactor scaling factor")
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
+    ax.legend(loc="best", fontsize=9)
+    fig.tight_layout()
+    out = results_dir / "multireactor_scaling.png"
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+    return out
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--results-dir", default="bench/results",
@@ -224,6 +272,8 @@ def main() -> int:
         filename="p99_vs_concurrency.png",
         yscale="log",
     )
+    if out: written.append(out)
+    out = plot_scaling(results_dir)
     if out: written.append(out)
 
     if not written:

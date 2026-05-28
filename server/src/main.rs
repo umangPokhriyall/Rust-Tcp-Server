@@ -30,6 +30,8 @@ struct Cli {
     port: u16,
     assets_dir: String,
     verbose: bool,
+    workers: Option<usize>,
+    max_connections: Option<usize>,
 }
 
 fn main() {
@@ -68,11 +70,17 @@ fn main() {
         }
     };
 
-    let cfg = ServerConfig {
+    let mut cfg = ServerConfig {
         addr: SocketAddr::from(([0, 0, 0, 0], cli.port)),
         assets_dir: PathBuf::from(&cli.assets_dir),
         ..ServerConfig::default()
     };
+    if let Some(w) = cli.workers {
+        cfg.workers = w.max(1);
+    }
+    if let Some(m) = cli.max_connections {
+        cfg.max_connections = m.max(1);
+    }
 
     if let Err(e) = server.serve(&cfg, Arc::new(app)) {
         eprintln!("server error: {e}");
@@ -113,6 +121,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Cli {
         port: 8080,
         assets_dir: "server/assets".to_string(),
         verbose: false,
+        workers: None,
+        max_connections: None,
     };
 
     while let Some(arg) = args.next() {
@@ -125,6 +135,22 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Cli {
                     eprintln!("invalid --port value: {raw}");
                     std::process::exit(2);
                 });
+            }
+            "--workers" => {
+                let raw = expect_value(&mut args, "--workers");
+                let w: usize = raw.parse().unwrap_or_else(|_| {
+                    eprintln!("invalid --workers value: {raw}");
+                    std::process::exit(2);
+                });
+                cli.workers = Some(w);
+            }
+            "--max-connections" => {
+                let raw = expect_value(&mut args, "--max-connections");
+                let m: usize = raw.parse().unwrap_or_else(|_| {
+                    eprintln!("invalid --max-connections value: {raw}");
+                    std::process::exit(2);
+                });
+                cli.max_connections = Some(m);
             }
             "--verbose" => cli.verbose = true,
             "-h" | "--help" => {
@@ -151,9 +177,13 @@ fn expect_value(args: &mut impl Iterator<Item = String>, flag: &str) -> String {
 
 fn print_usage() {
     eprintln!(
-        "usage: server [--model <name>] [--port <n>] [--assets-dir <path>] [--verbose]\n\
+        "usage: server [--model <name>] [--port <n>] [--assets-dir <path>] [--workers <n>] [--max-connections <n>] [--verbose]\n\
          \n\
-         Phase 0 wires only the `iterative` model.\n\
+         --workers overrides cfg.workers (default: num_cores()); used by the\n\
+         multireactor scaling study and preforked / thread-pool sizing.\n\
+         --max-connections overrides cfg.max_connections (default: 1024); used\n\
+         by the C10K study so single-reactor event-loop models can accept more\n\
+         than 1024 concurrent connections.\n\
          defaults: --model iterative --port 8080 --assets-dir server/assets"
     );
 }

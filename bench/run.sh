@@ -56,7 +56,7 @@ SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-10}"
 MODE="${MODE:-sweep}"
 PERF=0
 
-ALL_MODELS=(iterative forking preforked thread-per-conn thread-pool poll epoll-lt epoll-et event-loop)
+ALL_MODELS=(iterative forking preforked thread-per-conn thread-pool poll epoll-lt epoll-et event-loop multireactor io-uring)
 CONCURRENCY=(1 10 100 1000 10000)
 
 # rate ladder paired with the concurrency ladder. Chosen so the higher rungs
@@ -98,6 +98,17 @@ mkdir -p "$RESULTS_DIR"
 
 # Bump open-file limit best-effort: c=10000 needs ~20k fds on both sides.
 ulimit -n 65536 2>/dev/null || true
+
+# Loadgen spawns one thread per connection. With the default 12.5 MiB stack
+# (inherited from the shell's RLIMIT_STACK on Ubuntu), c=10000 reserves
+# ~125 GiB of virtual memory and trips heuristic overcommit on smaller hosts
+# (EAGAIN on pthread_create). bench/_loadgen_wrap.sh lowers the per-thread
+# stack to LOADGEN_STACK_KIB (default 128 KiB) — safe for the worker
+# function (small send/recv loop) — and exports RUST_MIN_STACK so Rust's
+# thread::Builder honors it.
+LOADGEN_WRAP="${LOADGEN_WRAP:-bench/_loadgen_wrap.sh}"
+export LOADGEN_BIN
+export LOADGEN_STACK_KIB="${LOADGEN_STACK_KIB:-128}"
 
 # ----- Process lifecycle -----
 
@@ -175,13 +186,13 @@ run_sweep_one() {
         if [[ "$PERF" == "1" && "$c" == "100" ]] && command -v perf >/dev/null 2>&1; then
             timeout --kill-after=5 "$POINT_BUDGET" \
                 perf stat -o "$RESULTS_DIR/perf_${model}_c${c}.txt" -- \
-                "$LOADGEN_BIN" --target "127.0.0.1:$port" --model "$model" \
+                "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
                     --rate "$rate" --connections "$c" \
                     --duration "$DURATION" --out "$csv" \
                     >>"$RESULTS_DIR/server_${model}.log" 2>&1 || rc=$?
         else
             timeout --kill-after=5 "$POINT_BUDGET" \
-                "$LOADGEN_BIN" --target "127.0.0.1:$port" --model "$model" \
+                "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
                     --rate "$rate" --connections "$c" \
                     --duration "$DURATION" --out "$csv" \
                     >>"$RESULTS_DIR/server_${model}.log" 2>&1 || rc=$?
@@ -247,7 +258,7 @@ soak_one() {
     ) &
     local sampler_pid=$!
 
-    "$LOADGEN_BIN" --target "127.0.0.1:$port" --model "$model" \
+    "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
         --rate "$SOAK_RATE" --connections "$SOAK_CONNS" \
         --duration "$DURATION" --out "$csv" \
         >>"$RESULTS_DIR/server_${model}.log" 2>&1 \
