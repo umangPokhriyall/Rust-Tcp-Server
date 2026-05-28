@@ -41,8 +41,10 @@ fn main() {
         }
     };
 
-    // Model dispatch. Phase 0 wires only `iterative`; this is deliberate — it
-    // stops Phase 1 models from being reached before they exist.
+    // Model dispatch (Phase 1 §9 DoD item 4: all 11 model names handled, with a
+    // clear message for any unknown name). The two Phase 2 names route to an
+    // explicit "deferred to Phase 2" arm so a user typing them gets a precise
+    // signal rather than the generic unknown-model message.
     let server: Box<dyn core::Server> = match cli.model.as_str() {
         "iterative" => Box::new(Iterative::new(cli.verbose)),
         "forking" => Box::new(Forking::new(cli.verbose)),
@@ -53,9 +55,16 @@ fn main() {
         "epoll-lt" => Box::new(EpollLt::new(cli.verbose)),
         "epoll-et" => Box::new(EpollEt::new(cli.verbose)),
         "event-loop" => Box::new(EventLoop::new(cli.verbose)),
-        other => {
-            eprintln!("model '{other}' not implemented yet");
+        m @ ("multireactor" | "io-uring") => {
+            eprintln!("model '{m}' is Phase 2 — not implemented yet");
             std::process::exit(1);
+        }
+        other => {
+            eprintln!("unknown model '{other}' — expected one of: iterative, \
+                       forking, preforked, thread-per-conn, thread-pool, \
+                       poll, epoll-lt, epoll-et, event-loop, multireactor, \
+                       io-uring");
+            std::process::exit(2);
         }
     };
 
