@@ -1,0 +1,9 @@
+=== scaling: workers=1 conns=1000 rate=80000 port=19081 dur=15s ===
+  workers=1 throughput=80000.0 p50=376575us p99=615935us
+=== scaling: workers=2 conns=1000 rate=80000 port=19082 dur=15s ===
+  workers=2 throughput=80000.0 p50=100us p99=346879us
+=== scaling: workers=4 conns=1000 rate=80000 port=19083 dur=15s ===
+  workers=4 throughput=80000.0 p50=98us p99=421887us
+=== scaling: workers=8 conns=1000 rate=80000 port=19084 dur=15s ===
+  workers=8 throughput=80000.0 p50=115us p99=327935us
+wrote bench/results/multireactor_scaling.csv
