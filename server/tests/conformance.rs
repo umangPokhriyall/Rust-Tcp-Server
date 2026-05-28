@@ -231,3 +231,13 @@ fn thread_pool_conformance() {
 fn poll_conformance() {
     run_conformance("poll");
 }
+
+#[test]
+fn epoll_lt_conformance() {
+    run_conformance("epoll-lt");
+}
+
+#[test]
+fn epoll_et_conformance() {
+    run_conformance("epoll-et");
+}

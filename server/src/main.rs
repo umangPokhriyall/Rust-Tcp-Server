@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use core::{App, Method, Request, Response, ServerConfig, StatusCode};
 
+use models::epoll::{EpollEt, EpollLt};
 use models::forking::Forking;
 use models::iterative::Iterative;
 use models::poll::Poll;
@@ -47,6 +48,8 @@ fn main() {
         "thread-per-conn" => Box::new(ThreadPerConn::new(cli.verbose)),
         "thread-pool" => Box::new(ThreadPool::new(cli.verbose)),
         "poll" => Box::new(Poll::new(cli.verbose)),
+        "epoll-lt" => Box::new(EpollLt::new(cli.verbose)),
+        "epoll-et" => Box::new(EpollEt::new(cli.verbose)),
         other => {
             eprintln!("model '{other}' not implemented yet");
             std::process::exit(1);

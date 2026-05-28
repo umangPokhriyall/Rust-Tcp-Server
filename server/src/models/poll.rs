@@ -18,7 +18,7 @@
 //! after the connection count drops.
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io;
 use std::net::TcpStream;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 use core::limits::READ_CHUNK;
 use core::{bind_listener, App, ConnAction, Connection, Server, ServerConfig};
 
+use crate::models::event_io::drive_io;
 use crate::sys::conn_table::ConnTable;
 use crate::sys::epoll::Interest;
 use crate::sys::poll::{poll, PollFd};
@@ -116,15 +117,7 @@ impl Server for Poll {
                     continue;
                 }
                 if pollfd.readable() || pollfd.writable() {
-                    drive(
-                        fd,
-                        &mut conns,
-                        &mut wants,
-                        &mut buf,
-                        &app,
-                        self.verbose,
-                        /* drain */ false,
-                    );
+                    drive(fd, &mut conns, &mut wants, &mut buf, &app, self.verbose);
                 }
             }
 
@@ -182,100 +175,24 @@ fn accept_one(
 }
 
 /// Drive one connection's readable/writable event through to a new action,
-/// updating its registered interest. `drain` is `false` for `poll` (LT), but
-/// the routine is shared so `epoll` (which sets `drain` per-trigger) can reuse
-/// the same write/read shape — see [`models::epoll`].
-pub(crate) fn drive(
+/// updating its `PollFd` interest in `wants`. The read/write loop itself lives
+/// in [`crate::models::event_io::drive_io`] — shared with the `epoll` models
+/// so the LT-vs-ET distinction is the *only* thing that differs between them.
+fn drive(
     fd: RawFd,
     conns: &mut ConnTable,
     wants: &mut HashMap<RawFd, Interest>,
     buf: &mut [u8],
     app: &App,
     verbose: bool,
-    drain: bool,
 ) {
     let slot = match conns.get_mut(fd) {
         Some(s) => s,
         None => return,
     };
-
-    let mut action = match wants.get(&fd).copied().unwrap_or(Interest::Read) {
-        Interest::Read => ConnAction::WantRead,
-        Interest::Write => ConnAction::WantWrite,
-        Interest::ReadWrite => ConnAction::WantRead,
-    };
-
-    loop {
-        match action {
-            ConnAction::WantRead => {
-                match slot.stream.read(buf) {
-                    Ok(0) => {
-                        action = ConnAction::Close;
-                        break;
-                    }
-                    Ok(n) => {
-                        action = slot.conn.on_bytes(&buf[..n], app);
-                        // ET (drain=true): keep reading while the loop still
-                        // wants more, until EAGAIN. LT (drain=false): one read
-                        // per readable event, then yield back to the poller.
-                        if !drain || !matches!(action, ConnAction::WantRead) {
-                            break;
-                        }
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) => {
-                        if verbose {
-                            eprintln!("poll: read error: {e}");
-                        }
-                        app.metrics().inc_errors();
-                        action = ConnAction::Close;
-                        break;
-                    }
-                }
-            }
-            ConnAction::WantWrite => {
-                let pending = slot.conn.pending_write();
-                if pending.is_empty() {
-                    // Defensive — state says Write but nothing buffered.
-                    action = ConnAction::WantRead;
-                    break;
-                }
-                match slot.stream.write(pending) {
-                    Ok(0) => {
-                        action = ConnAction::Close;
-                        break;
-                    }
-                    Ok(n) => {
-                        action = slot.conn.on_written(n);
-                        // If we still WantWrite (partial response), let the
-                        // poller wake us when writable again — applies to both
-                        // LT and ET, and is the ET partial-write resumption.
-                        if matches!(action, ConnAction::WantWrite) {
-                            break;
-                        }
-                        // WantRead/Close — fall through. WantRead jumps back to
-                        // the read arm above only in `drain` mode, otherwise we
-                        // just update the registration and yield.
-                        if !drain {
-                            break;
-                        }
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) => {
-                        if verbose {
-                            eprintln!("poll: write error: {e}");
-                        }
-                        app.metrics().inc_errors();
-                        action = ConnAction::Close;
-                        break;
-                    }
-                }
-            }
-            ConnAction::Close => break,
-        }
-    }
-
-    // Apply the resulting action to the per-fd interest map.
+    // LT, no drain: a single read or write per event. The kernel will fire
+    // again next iteration if the fd is still ready.
+    let action = drive_io(slot, buf, app, /* drain */ false, verbose, "poll");
     match action {
         ConnAction::WantRead => {
             wants.insert(fd, Interest::Read);

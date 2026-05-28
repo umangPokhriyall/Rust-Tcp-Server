@@ -10,6 +10,8 @@ use std::sync::Arc;
 use core::ServerConfig;
 
 pub mod blocking;
+pub mod epoll;
+pub mod event_io;
 pub mod forking;
 pub mod iterative;
 pub mod poll;
