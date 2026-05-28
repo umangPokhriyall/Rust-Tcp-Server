@@ -1,0 +1,12 @@
+=== c10k: iterative conns=8000 rate=50000 port=20081 dur=30s ===
+=== c10k: forking conns=8000 rate=50000 port=20082 dur=30s ===
+=== c10k: preforked conns=8000 rate=50000 port=20083 dur=30s ===
+=== c10k: thread-per-conn conns=8000 rate=50000 port=20084 dur=30s ===
+=== c10k: thread-pool conns=8000 rate=50000 port=20085 dur=30s ===
+=== c10k: poll conns=8000 rate=50000 port=20086 dur=30s ===
+=== c10k: epoll-lt conns=8000 rate=50000 port=20087 dur=30s ===
+=== c10k: epoll-et conns=8000 rate=50000 port=20088 dur=30s ===
+=== c10k: event-loop conns=8000 rate=50000 port=20089 dur=30s ===
+=== c10k: multireactor conns=8000 rate=50000 port=20090 dur=30s ===
+=== c10k: io-uring conns=8000 rate=50000 port=20091 dur=30s ===
+wrote bench/results/c10k_summary.csv

@@ -1,0 +1,2 @@
+model,rate,connections,throughput_rps,errors,p50,p90,p99,p999,p9999,max
+io-uring,50000,8000,18402.4,947927,83,111,16463,131839,258943,263679

@@ -1,0 +1,12 @@
+model,connections,rate,duration_s,first_rss_kib,last_rss_kib,first_fds,last_fds,max_zombies,ctx_voluntary,ctx_involuntary,verdict
+iterative,8000,50000,30,2636,2636,5,5,,8,1,saturated
+forking,8000,50000,30,2628,2628,4,5,,7,57,loadgen-error
+preforked,8000,50000,30,2628,2628,3,3,,1500,2,saturated
+thread-per-conn,8000,50000,30,121104,121104,4608,4608,,1025,11,loadgen-error
+thread-pool,8000,50000,30,3144,3176,8004,4,,6622,0,ok
+poll,8000,50000,30,3684,10176,3042,8004,,77,326,ok
+epoll-lt,8000,50000,30,9964,10044,8005,5,,2299,593,ok
+epoll-et,8000,50000,30,10048,10056,8005,5,,3263,933,ok
+event-loop,8000,50000,30,10036,10056,8005,5,,1955,9008,ok
+multireactor,8000,50000,30,10396,10408,8019,19,,8,1,ok
+io-uring,8000,50000,30,10868,10900,8005,5,,173003,952,ok
