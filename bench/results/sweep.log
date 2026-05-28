@@ -1,0 +1,78 @@
+=== sweep: iterative ===
+  -- c=1 rate=500 dur=10s port=18080
+  -- c=10 rate=5000 dur=10s port=18081
+  -- c=100 rate=20000 dur=10s port=18082
+  -- c=1000 rate=40000 dur=10s port=18083
+  -- c=10000 rate=50000 dur=10s port=18084
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: forking ===
+  -- c=1 rate=500 dur=10s port=18085
+  -- c=10 rate=5000 dur=10s port=18086
+  -- c=100 rate=20000 dur=10s port=18087
+  -- c=1000 rate=40000 dur=10s port=18088
+  -- c=10000 rate=50000 dur=10s port=18089
+     loadgen exited rc=101 — continuing
+=== sweep: preforked ===
+  -- c=1 rate=500 dur=10s port=18090
+  -- c=10 rate=5000 dur=10s port=18091
+  -- c=100 rate=20000 dur=10s port=18092
+  -- c=1000 rate=40000 dur=10s port=18093
+  -- c=10000 rate=50000 dur=10s port=18094
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: thread-per-conn ===
+  -- c=1 rate=500 dur=10s port=18095
+  -- c=10 rate=5000 dur=10s port=18096
+  -- c=100 rate=20000 dur=10s port=18097
+  -- c=1000 rate=40000 dur=10s port=18098
+  -- c=10000 rate=50000 dur=10s port=18099
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: thread-pool ===
+  -- c=1 rate=500 dur=10s port=18100
+  -- c=10 rate=5000 dur=10s port=18101
+  -- c=100 rate=20000 dur=10s port=18102
+  -- c=1000 rate=40000 dur=10s port=18103
+  -- c=10000 rate=50000 dur=10s port=18104
+     loadgen exited rc=101 — continuing
+=== sweep: poll ===
+  -- c=1 rate=500 dur=10s port=18105
+  -- c=10 rate=5000 dur=10s port=18106
+  -- c=100 rate=20000 dur=10s port=18107
+  -- c=1000 rate=40000 dur=10s port=18108
+  -- c=10000 rate=50000 dur=10s port=18109
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: epoll-lt ===
+  -- c=1 rate=500 dur=10s port=18110
+  -- c=10 rate=5000 dur=10s port=18111
+  -- c=100 rate=20000 dur=10s port=18112
+  -- c=1000 rate=40000 dur=10s port=18113
+  -- c=10000 rate=50000 dur=10s port=18114
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: epoll-et ===
+  -- c=1 rate=500 dur=10s port=18115
+  -- c=10 rate=5000 dur=10s port=18116
+  -- c=100 rate=20000 dur=10s port=18117
+  -- c=1000 rate=40000 dur=10s port=18118
+  -- c=10000 rate=50000 dur=10s port=18119
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: event-loop ===
+  -- c=1 rate=500 dur=10s port=18120
+  -- c=10 rate=5000 dur=10s port=18121
+  -- c=100 rate=20000 dur=10s port=18122
+  -- c=1000 rate=40000 dur=10s port=18123
+  -- c=10000 rate=50000 dur=10s port=18124
+     point exceeded 100s budget — recording a saturation row and moving on
+=== sweep: multireactor ===
+  -- c=1 rate=500 dur=10s port=18125
+  -- c=10 rate=5000 dur=10s port=18126
+  -- c=100 rate=20000 dur=10s port=18127
+  -- c=1000 rate=40000 dur=10s port=18128
+  -- c=10000 rate=50000 dur=10s port=18129
+     loadgen exited rc=101 — continuing
+=== sweep: io-uring ===
+  -- c=1 rate=500 dur=10s port=18130
+  -- c=10 rate=5000 dur=10s port=18131
+  -- c=100 rate=20000 dur=10s port=18132
+  -- c=1000 rate=40000 dur=10s port=18133
+  -- c=10000 rate=50000 dur=10s port=18134
+     loadgen exited rc=101 — continuing
+done.
