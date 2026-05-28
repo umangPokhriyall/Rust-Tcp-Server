@@ -1,0 +1,4 @@
+model,strace_total_syscalls,strace_requests,syscalls_per_req,ctx_vol_delta,ctx_nonvol_delta,ctx_total_delta,ctx_requests,ctx_switches_per_req
+epoll-et,40235,10000,4.024,60048,415,60463,60000,1.008
+multireactor,40595,10000,4.059,59618,9592,69210,60000,1.153
+io-uring,20154,10000,2.015,60033,317,60350,60000,1.006
