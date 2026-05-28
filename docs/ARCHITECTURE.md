@@ -1,104 +1,178 @@
 # Architecture — Rust-Tcp-Server
 
-A benchmark teardown of TCP server I/O models, from an `accept()`-in-a-loop to
-`io_uring`, built behind **one** `Server` trait. The whole point is that the
-HTTP work lives in exactly one place and every concurrency model reuses it
-unchanged. This document describes the design that makes that possible: the
-**sans-IO** `core` crate and the per-connection **`Connection`** state machine.
+A benchmark teardown of TCP server I/O models, from an `accept()`-in-a-loop to a
+purpose-built `io_uring` completion engine, built behind one `Server` trait. The
+governing constraint is that the HTTP work lives in exactly one place — the
+sans-IO `core` crate — and every one of the eleven concurrency models reuses it
+unchanged. This document describes the four-layer design that makes that hold,
+the per-layer contracts, the evidence that one frozen `core` served all eleven
+models, and the key design decisions with the alternatives they rejected.
 
-## The sans-IO principle
+## 1. Layering
 
-`core` contains **zero socket I/O**. It never calls `read`, `write`, `accept`,
-or `epoll`. It is a pure library of:
-
-- an incremental HTTP **request parser** (`http::request`),
-- a **response encoder** (`http::response`),
-- a trie **router** (`router`),
-- an in-memory **asset cache** (`asset`),
-- a per-connection **state machine** (`conn`),
-
-all of which operate **only on byte buffers in memory**.
-
-The *models* (`iterative` today; `epoll-et`, `io-uring`, … later) own every
-syscall. They obtain readiness however their strategy dictates, perform the
-reads and writes, and feed bytes to / drain bytes from `core`.
-
-**Why this is non-negotiable.** A blocking accept-loop model and an `io_uring`
-completion-based model have nothing in common at the I/O layer — one waits on a
-blocking `read`, the other reaps completions from a ring. The *only* way one
-`core` can serve all eleven models without modification is if `core` never
-touches a socket. The legacy repo coupled parsing to `TcpStream`
-(`route_client(stream)`), which is precisely why it could not extend past a
-blocking loop. `core` reintroduces no such coupling anywhere.
-
-> The one sanctioned exception is `core::bind_listener` (`server.rs`), a
-> *setup* helper that creates and binds a listening socket via `socket2`
-> (including the `SO_REUSEPORT` path for preforked/multireactor models). Binding
-> and `listen()` are connection-setup, not per-connection I/O; no `read`,
-> `write`, `accept`, or `epoll` lives in `core`.
-
-## Crate layout
+Four layers, dependencies pointing downward only. The sans-IO boundary is the
+line above which no code touches a socket.
 
 ```
-core/                         # the sans-IO library — the single source of truth
-  src/
-    lib.rs                    # re-exports the public surface (spec §10)
-    limits.rs                 # bounded-input ceilings (DoS defense)
-    http/{method,headers,request,response}.rs
-    router.rs                 # trie Router + pure Handler type
-    asset.rs                  # AssetCache: load once at boot, serve from RAM
-    app.rs                    # App (router+assets+metrics), Arc-shared, Send+Sync
-    conn.rs                   # Connection state machine + ConnAction
-    server.rs                 # Server trait, ServerConfig, bind_listener
-    metrics.rs                # atomic counters
-server/                       # one binary: `server --model <name> --port <p>`
-  src/main.rs                 # CLI, App construction, model dispatch
-  src/models/iterative.rs     # the Phase 0 reference model
-  assets/                     # benchmark fixtures (index.html, static/style.css)
+                       ┌──────────────────────────────────────────────┐
+   models/             │  iterative  forking  preforked  thread-per-   │
+   (one strategy each, │  conn  thread-pool  poll  epoll-lt  epoll-et   │
+    each impl Server)  │  event-loop  multireactor  io-uring            │
+                       └───────────────┬───────────────┬───────────────┘
+                                       │               │
+                          (event-loop, │               │ (blocking models,
+                           multireactor)│               │  io-uring use sys
+                                       ▼               │  directly)
+   reactor.rs           ┌──────────────────────────┐   │
+   (epoll-ET assembly)  │  Reactor: epoll loop +    │   │
+                        │  ConnTable, drives core   │   │
+                        └───────────────┬───────────┘   │
+                                        │               │
+                                        ▼               ▼
+   sys/                 ┌──────────────────────────────────────────────┐
+   (raw OS I/O)         │  socket  poll  epoll  affinity  signal         │
+                        │  conn_table  syscall      — every syscall here │
+                        └───────────────┬──────────────────────────────┘
+                                        │
+   ─────────────────────────────────── │ ──── SANS-IO BOUNDARY ─────────
+   nothing below touches a socket       ▼
+   core/                ┌──────────────────────────────────────────────┐
+   (sans-IO protocol)   │  http::{request,response}  router  asset  app  │
+   FROZEN since Phase 0 │  Connection (state machine) + ConnAction       │
+                        │  Server trait, ServerConfig, bind_listener     │
+                        └──────────────────────────────────────────────┘
 ```
 
-`App` is built once at boot, wrapped in `Arc`, and shared **read-only** by every
-worker / thread / forked child; it is `Send + Sync` (enforced by a compile-time
-assertion in `app.rs`). A `Handler` is a **pure** function
-`fn(&Request, &App) -> Response` — no I/O, no blocking — which replaces the
-legacy `fn(TcpStream) -> Result<()>`.
+`core` depends on nothing in the project. `sys` depends on `libc` and `core`'s
+types but performs no protocol logic. `reactor` assembles `sys` primitives and
+drives a `core::Connection`. Each `models/` module selects one concurrency
+strategy and reuses everything beneath it. No layer reaches upward.
 
-## Bounded inputs
+## 2. Per-layer contracts
 
-Every ceiling in `limits.rs` is enforced by the parser; exceeding one is a fatal
-parse error mapped to an HTTP status (`414`, `431`, `413`, `505`, …). This is
-what makes the server slow-loris- and memory-DoS-resistant: an attacker cannot
-make the parser buffer unbounded request lines, headers, or bodies.
+### `core/` — the sans-IO protocol library
 
-## The request lifecycle
+- **Owns:** the HTTP request parser (`http::request`), response encoder
+  (`http::response`), trie router (`router`), in-memory asset cache (`asset`),
+  the per-connection `Connection` state machine and its `ConnAction` contract
+  (`conn`), the `Server` trait and `ServerConfig` (`server`), bounded-input
+  ceilings (`limits`), and atomic metrics (`metrics`).
+- **Must never:** call `read`, `write`, `accept`, `epoll`, or any other
+  per-connection syscall. It operates only on byte buffers in memory and the
+  monotonic clock (for deadlines). It is **frozen** — byte-for-byte unchanged
+  since Phase 0.
+- **Public surface:** re-exported from `core::lib`. The model-facing pieces are
+  `Connection`, `ConnAction`, `App`, `Server`, `ServerConfig`, and the
+  setup-only helper `bind_listener`.
+- **The one sanctioned exception** is `bind_listener` (`server.rs`): a *setup*
+  helper that creates and binds a listening socket via `socket2`, including the
+  `SO_REUSEPORT` path for `preforked` and `multireactor`. Binding and `listen()`
+  are connection-*setup*, not per-connection I/O; no `read`, `write`, `accept`,
+  or `epoll` lives in `core`.
+
+### `server/src/sys/` — raw OS I/O
+
+- **Owns:** thin, honest `libc` wrappers — `socket` (non-blocking sockets,
+  `SO_REUSEPORT`), `poll`, `epoll` (level- and edge-triggered), `affinity` (CPU
+  pinning), `signal` (SIGINT/SIGTERM shutdown), `conn_table` (fd→connection
+  slab), and `syscall` (retry/`EINTR` helpers). Every syscall in the project
+  lives here.
+- **Must never:** contain protocol or HTTP logic, and must not hide the semantic
+  differences between mechanisms — `poll`, `epoll-lt`, and `epoll-et` stay
+  distinct so the models can measure their difference. `sys` removes copy-pasted
+  FFI and fd bookkeeping, nothing more.
+- **Public surface:** one module per primitive (`affinity`, `conn_table`,
+  `epoll`, `poll`, `signal`, `socket`, `syscall`).
+
+### `server/src/reactor.rs` — event-loop assembly
+
+- **Owns:** the epoll-ET readiness loop: an `epoll` instance plus a `ConnTable`,
+  arming/disarming interest from each `ConnAction`, draining each socket to
+  `EAGAIN`, managing `EPOLLOUT` for partial writes, and driving the
+  `core::Connection` for every fd. `Reactor::new` builds it; `Reactor::run`
+  runs it until the shared shutdown flag is set.
+- **Must never:** select a model or own a concurrency policy. It is one reusable
+  reactor; the `event-loop` model runs one of it on one thread, and each
+  `multireactor` worker runs its own pinned instance over its own
+  `SO_REUSEPORT` listener.
+- **Public surface:** `Reactor`, `Reactor::new(...)`, `Reactor::run(&shutdown,
+  &app)`.
+
+### `server/src/models/` — the eleven strategies
+
+- **Owns:** one concurrency/I-O strategy per module, each implementing
+  `core::Server`. The blocking models share one serve loop (`blocking.rs`); the
+  event-loop models share the `reactor`. A model owns *only* how readiness or
+  completion is obtained and how work is dispatched.
+- **Must never:** re-implement HTTP handling or copy-paste the serve loop. The
+  only thing that varies between `iterative` and `io-uring` is the I/O strategy,
+  not the protocol — that is what makes the benchmark a controlled comparison.
+- **Public surface:** each model is a struct implementing `Server`; `main.rs`
+  dispatches on the `--model` name.
+
+## 3. The sans-IO rationale
+
+A blocking accept-loop model and an `io_uring` completion model have nothing in
+common at the I/O layer: one waits on a blocking `read`, the other reaps
+completions from a ring. The only way one `core` can serve all eleven models
+without modification is if `core` never touches a socket — so the protocol logic
+consumes and produces byte buffers and reports intent (`WantRead` / `WantWrite`
+/ `Close`), and the model performs the actual syscalls.
+
+The concrete payoff is that blocking `read`/`write`, epoll readiness, and
+`io_uring` completion all reuse one `Connection` state machine. The legacy repo
+coupled parsing to `TcpStream` (`route_client(stream)`), which is precisely why
+it could not extend past a blocking loop. `core` reintroduces no such coupling,
+and the benchmark confirms the payoff three ways: the same machine drove blocking
+I/O, epoll readiness, and `io_uring` completion, unmodified
+(`docs/BENCHMARKS.md` §7).
+
+## 4. Evidence — one frozen core served all eleven models
+
+Every model below consumes the same unmodified `core::Connection`. `core` is
+byte-for-byte unchanged since Phase 0; the I/O mechanism column is the *only*
+axis that varies.
+
+| Model | I/O mechanism | Consumes unmodified `core::Connection`? |
+|---|---|---|
+| iterative | Blocking serve loop, one connection at a time | Y |
+| forking | Blocking serve loop in a per-connection `fork()` child | Y |
+| preforked | Blocking serve loop in a fixed `SO_REUSEPORT` worker pool | Y |
+| thread-per-conn | Blocking serve loop on a per-connection OS thread | Y |
+| thread-pool | Blocking serve loop on a bounded worker pool | Y |
+| poll | `poll(2)` readiness, non-blocking sockets | Y |
+| epoll-lt | Level-triggered `epoll` readiness | Y |
+| epoll-et | Edge-triggered `epoll` readiness, drain to `EAGAIN` | Y |
+| event-loop | epoll-ET via the reusable `reactor` | Y |
+| multireactor | Pinned per-core `reactor`, `SO_REUSEPORT`, shared-nothing | Y |
+| io-uring | Single-ring completion: multishot accept, provided buffers | Y |
+
+All eleven rows are Y. The blocking models drive `Connection` through the shared
+serve loop, the readiness models through their epoll/poll loops, the event-loop
+and `multireactor` models through the reactor, and `io-uring` feeds completions
+into the identical `on_bytes` / `on_written` contract.
+
+## 5. Connection lifecycle
+
+`core::Connection` is the per-connection state machine every model drives. It is
+sans-IO: the model performs all reads and writes; the connection consumes and
+produces byte buffers and reports the next action via `ConnAction`.
 
 ```
-model: accept() ─▶ Connection::new(read_timeout)
+model: accept() ─▶ Connection::new(read_timeout)             [Reading]
         │
         ├─ read bytes ───▶ conn.on_bytes(&buf, &app) ──▶ ConnAction
-        │                     │
-        │                     ├─ RequestParser.push(bytes)
-        │                     │     Incomplete ─▶ WantRead
-        │                     │     Complete   ─▶ App::handle(req) ─▶ encode ─▶ WantWrite
-        │                     │     Failed     ─▶ error Response   ─▶ encode ─▶ WantWrite (then Close)
+        │                     RequestParser.push(bytes)
+        │                       Incomplete ─▶ WantRead         [Reading]
+        │                       Complete   ─▶ App::handle ─▶ encode ─▶ WantWrite   [Writing]
+        │                       Failed     ─▶ error Response ─▶ encode ─▶ WantWrite then Close
         │
         ├─ write bytes ──▶ conn.on_written(n) ──▶ ConnAction
-        │                     drained + keep-alive ─▶ WantRead (deadline refreshed)
-        │                     drained + close      ─▶ Close
+        │                     drained + keep-alive ─▶ WantRead (deadline refreshed) [KeepAlive→Reading]
+        │                     drained + close      ─▶ Close                          [Close]
         │
-        └─ timer tick ───▶ conn.is_expired(now) ─▶ close if true
+        └─ timer tick ───▶ conn.is_expired(now) ─▶ Close if true
 ```
-
-`App::handle` routes a parsed request: an unsupported method → `405`, no
-matching route → `404`, otherwise the matched `Handler` runs. `HEAD` shares
-`GET`'s routing table; the body is dropped later, at encode time.
-
-## The `Connection` contract
-
-`core::Connection` is the per-connection state machine that **every** model
-drives. It is **sans-IO**: the model performs all reads/writes; the connection
-only consumes/produces byte buffers and tells the model what to do next via
-`ConnAction`:
 
 | `ConnAction` | Meaning for the model |
 |---|---|
@@ -108,74 +182,74 @@ only consumes/produces byte buffers and tells the model what to do next via
 
 The contracts the state machine guarantees:
 
-- **Sans-IO.** It performs no syscalls (it reads only the monotonic clock for
-  deadlines).
-- **In-connection error responses.** On a parse `Failed`, `on_bytes` itself
-  builds the error response (status from `ParseError::status()`), encodes it
-  with `keep_alive = false`, and the post-write action is `Close`. The model
-  never sees the error — it just gets `WantWrite` then `Close`. *This is the
-  one-place fix for the legacy "one bad request kills the server" bug:* an error
-  is a normal response followed by a close, not a propagated `?`.
-- **HEAD handling.** For a `HEAD` request, the response is encoded with
-  `include_body = false` — correct headers and `Content-Length`, no body bytes.
+- **Sans-IO.** No syscalls; it reads only the monotonic clock for deadlines.
+- **In-connection error responses.** On a parse `Failed`, `on_bytes` builds the
+  error response (status from `ParseError::status()`), encodes it with
+  `keep_alive = false`, and the post-write action is `Close`. The model never
+  sees the error — it gets `WantWrite` then `Close`. This is the one-place fix
+  for the legacy "one bad request kills the server" bug: an error is a normal
+  response followed by a close, not a propagated `?`.
+- **HEAD handling.** A `HEAD` response is encoded with `include_body = false` —
+  correct headers and `Content-Length`, no body bytes.
 - **Keep-alive + deadline refresh.** When `on_written` fully drains the response
   and the request wanted keep-alive, the connection resets its parser, returns
-  to reading, and **refreshes the read deadline**. Bytes that arrived past the
-  current request are retained by `RequestParser::reset`, so a pipelined request
-  is not lost (full pipelining is out of scope for Phase 0, but the retain rule
-  holds so it can be added later without redesign).
+  to `Reading`, and refreshes the read deadline. Bytes that arrived past the
+  current request are retained by `RequestParser::reset` so a pipelined request
+  is not lost.
 - **Timeouts.** `is_expired(now)` lets event-loop models drop a stalled
   connection on a timer tick; blocking models additionally rely on socket
-  read/write timeouts. A slow client is never allowed to pin a worker forever.
-- **Model-agnostic.** The same `Connection` type is used unchanged by blocking
-  models and event-loop models.
+  read/write timeouts. A slow client never pins a worker forever.
 
-### Usage skeletons
+## 6. Key design decisions and rejected alternatives
 
-The two shapes every model fits, verified to type-check against the API in
-`conn.rs` (`#[cfg(test)] mod skeletons`):
+Each decision states the alternative it rejected and the tradeoff accepted.
 
-**Blocking** (`iterative`, `forking`, `thread-per-conn`, `thread-pool`):
+- **No async runtime / no tokio.** *Rejected:* building the models on `tokio` or
+  `async-std`. *Reason:* the project measures I/O *mechanisms* — blocking,
+  `poll`, level- and edge-triggered `epoll`, `io_uring` completion — and an async
+  runtime would hide exactly the mechanism under study behind its own scheduler
+  and reactor. `io_uring` uses the raw `io-uring` crate, never `tokio-uring`, for
+  the same reason. *Tradeoff accepted:* more hand-written event-loop and lifetime
+  code, in exchange for a controlled, mechanism-level comparison.
 
-```text
-let mut conn = Connection::new(read_timeout);
-let mut action = ConnAction::WantRead;
-loop {
-    match action {
-        WantRead  => { n = stream.read(&mut buf)?; if n == 0 { break } action = conn.on_bytes(&buf[..n], &app); }
-        WantWrite => { let w = stream.write(conn.pending_write())?; action = conn.on_written(w); }
-        Close     => break,
-    }
-}
-```
+- **Shared-nothing `SO_REUSEPORT` over single-acceptor + fd handoff.** The
+  kickoff brief sketched "one acceptor + N reactors." *Rejected:* a shared
+  acceptor thread that accepts and hands fds to reactors over a queue. *Reason:*
+  `SO_REUSEPORT` lets the kernel 4-tuple-hash connections directly to a
+  per-reactor listener, removing the acceptor, the fd-handoff queue, and the only
+  shared hot-path state. *Tradeoff accepted:* the kernel's hash balancing has no
+  work-stealing, so skewed connection lifetimes can imbalance reactors
+  (`docs/BENCHMARKS.md` §7, the `multireactor` caveat) — accepted because the
+  benchmark confirms zero shared-state contention and the best C10K median of any
+  model, p50 = 86 µs (`bench/results/c10k_multireactor.csv`).
 
-**Event loop** (`poll`, `epoll-*`, `event-loop`, `multireactor`, `io-uring`):
+- **`Vec` header store over `HashMap`.** *Rejected:* a `HashMap` keyed by header
+  name. *Reason:* requests carry a handful of headers; a small linear-scanned
+  `Vec` avoids per-request hashing and allocation and is faster at that size.
+  *Tradeoff accepted:* O(n) header lookup, which is cheaper than hashing for the
+  realistic header count and within the bounded `limits.rs` ceiling.
 
-```text
-on readable(fd):  loop { n = read(fd, buf) until EAGAIN; action = conn.on_bytes(&buf[..n], &app); } -> set interest from action
-on writable(fd):  w = write(fd, conn.pending_write()); action = conn.on_written(w);                 -> set interest from action
-on timer tick:    if conn.is_expired(now) { close(fd) }
-```
+- **Provided buffer rings over per-read allocation (io-uring).** *Rejected:*
+  posting a freshly allocated buffer with each read SQE. *Reason:* a provided
+  buffer ring lets the kernel select the read buffer and report it in the CQE,
+  which — with multishot accept — removes the per-accept and per-read submission
+  syscalls and is what drives `io_uring` to 2.015 syscalls/req against
+  epoll-et's 4.024 (`bench/results/profiles/summary.csv`). *Tradeoff accepted:*
+  ring/buffer bookkeeping and tighter coupling to the kernel ABI, in exchange for
+  the syscall-elimination the model exists to demonstrate.
 
-## The Phase 0 model: `iterative`
+- **Single-ring, single-thread io-uring scope.** *Rejected:* thread-per-core,
+  multi-ring `io_uring` (the production form). *Reason:* a single ring on a
+  single thread isolates syscall-elimination from core count, making the fair
+  comparison single-ring `io_uring` vs single-thread `epoll-et`. *Tradeoff
+  accepted:* this `io_uring` sheds load above C≈1000 and does not lead absolute
+  throughput — `multireactor` does, on N cores (`docs/BENCHMARKS.md` §8) — but
+  the syscall result it isolates holds on the apples-to-apples axis. Multi-ring
+  `io_uring` is noted as future work, not built.
 
-A single thread that accepts one connection at a time and serves it to
-completion using the blocking skeleton above. Its job is to be the **correct
-reference** the later models are measured against:
-
-- Every per-connection error is caught and (optionally, behind `--verbose`)
-  logged off the hot path; the accept loop continues. One bad client never takes
-  the server down.
-- Read/write timeouts are set on every stream.
-- Static assets are served from the in-memory cache, never re-read from disk.
-- No hot-path logging by default.
-
-## Why this shape (the through-line to later phases)
-
-The model owns *only* its concurrency/I-O strategy; everything else is `core`.
-That is what makes the eventual benchmark honest — the only thing that varies
-between `iterative` and `io-uring` is how readiness/completion is obtained and
-how work is dispatched, not the HTTP handling. It is also the direct rehearsal
-for the target domain: a microVM sandbox control plane is a multi-reactor
-event-loop server dispatching to isolated workers, and the per-connection state
-machine here is the same shape as a sandbox lifecycle state machine.
+- **Bounded inputs enforced in the parser.** *Rejected:* trusting client input
+  sizes. *Reason:* every ceiling in `limits.rs` (request-line, header, body,
+  version) is enforced by the parser and mapped to an HTTP status (`414`, `431`,
+  `413`, `505`), so an attacker cannot make the parser buffer unbounded input.
+  *Tradeoff accepted:* a fixed refusal point on oversized but legitimate inputs,
+  in exchange for slow-loris and memory-DoS resistance.
