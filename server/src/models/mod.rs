@@ -12,6 +12,7 @@ use core::ServerConfig;
 pub mod blocking;
 pub mod forking;
 pub mod iterative;
+pub mod poll;
 pub mod preforked;
 pub mod thread_per_conn;
 pub mod thread_pool;

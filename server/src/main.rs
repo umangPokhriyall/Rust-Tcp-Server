@@ -15,6 +15,7 @@ use core::{App, Method, Request, Response, ServerConfig, StatusCode};
 
 use models::forking::Forking;
 use models::iterative::Iterative;
+use models::poll::Poll;
 use models::preforked::Preforked;
 use models::thread_per_conn::ThreadPerConn;
 use models::thread_pool::ThreadPool;
@@ -45,6 +46,7 @@ fn main() {
         "preforked" => Box::new(Preforked::new(cli.verbose)),
         "thread-per-conn" => Box::new(ThreadPerConn::new(cli.verbose)),
         "thread-pool" => Box::new(ThreadPool::new(cli.verbose)),
+        "poll" => Box::new(Poll::new(cli.verbose)),
         other => {
             eprintln!("model '{other}' not implemented yet");
             std::process::exit(1);

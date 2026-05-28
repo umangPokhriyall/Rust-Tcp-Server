@@ -226,3 +226,8 @@ fn thread_per_conn_conformance() {
 fn thread_pool_conformance() {
     run_conformance("thread-pool");
 }
+
+#[test]
+fn poll_conformance() {
+    run_conformance("poll");
+}
