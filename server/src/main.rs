@@ -5,6 +5,7 @@
 //! Phase 0; any other name exits with a not-implemented message.
 
 mod models;
+mod reactor;
 mod sys;
 
 use std::net::SocketAddr;
@@ -14,6 +15,7 @@ use std::sync::Arc;
 use core::{App, Method, Request, Response, ServerConfig, StatusCode};
 
 use models::epoll::{EpollEt, EpollLt};
+use models::event_loop::EventLoop;
 use models::forking::Forking;
 use models::iterative::Iterative;
 use models::poll::Poll;
@@ -50,6 +52,7 @@ fn main() {
         "poll" => Box::new(Poll::new(cli.verbose)),
         "epoll-lt" => Box::new(EpollLt::new(cli.verbose)),
         "epoll-et" => Box::new(EpollEt::new(cli.verbose)),
+        "event-loop" => Box::new(EventLoop::new(cli.verbose)),
         other => {
             eprintln!("model '{other}' not implemented yet");
             std::process::exit(1);

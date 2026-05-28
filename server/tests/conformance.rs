@@ -241,3 +241,8 @@ fn epoll_lt_conformance() {
 fn epoll_et_conformance() {
     run_conformance("epoll-et");
 }
+
+#[test]
+fn event_loop_conformance() {
+    run_conformance("event-loop");
+}

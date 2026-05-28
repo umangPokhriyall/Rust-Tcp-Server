@@ -12,6 +12,7 @@ use core::ServerConfig;
 pub mod blocking;
 pub mod epoll;
 pub mod event_io;
+pub mod event_loop;
 pub mod forking;
 pub mod iterative;
 pub mod poll;
