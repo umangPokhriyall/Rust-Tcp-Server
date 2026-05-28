@@ -6,24 +6,24 @@ built behind one `Server` trait. Proof-of-work artifact. Correctness and
 measurement rigor matter more than features.
 
 ## Authoritative specs
-- docs/specs/kickoff-brief.md  — strategy, full model list, the §4 common bar
-- docs/specs/phase0-spec.md    — the core foundation (reference; core is FROZEN)
-- docs/specs/phase1-spec.md    — the CURRENT phase: sys, reactor, 8 models, loadgen, bench
+- docs/specs/kickoff-brief.md  — strategy, full model list, §4 common bar
+- docs/specs/phase0-spec.md    — core foundation (FROZEN)
+- docs/specs/phase1-spec.md    — sys, reactor, first 9 models, loadgen, bench
+- docs/specs/phase2-spec.md    — CURRENT: multireactor, io-uring, sweep, writeups
 
-## Hard rules (never violate)
-1. `core` is FROZEN in Phase 1 — add nothing, change nothing in the core crate.
-2. OS I/O syscalls live in `server/src/sys/`, never in `core`.
-3. No logging on the hot path. No async runtime (no tokio).
-4. Phase 1 dependency allowlist: core -> socket2 only; server -> core, socket2,
-   libc; loadgen -> hdrhistogram + std. Add nothing else.
-5. One abstraction, many implementations — no copy-pasted logic between models.
+## Hard rules
+1. `core` is FROZEN. OS I/O lives in server/src/sys/. io_uring uses the raw
+   `io-uring` crate only — never tokio-uring/tokio.
+2. No hot-path logging. No async runtime. io_uring must be PURPOSE-BUILT.
+3. Phase 2 deps: server -> `io-uring`. Nothing else.
+4. WRITING STANDARD (BENCHMARKS/README/ARCHITECTURE/x-thread): authoritative,
+   declarative, every number cites its committed source file with units and
+   conditions. No marketing words (blazing/incredible/seamless/etc.), no emoji,
+   no exclamation. Honesty about what underperformed is required. Build writeups
+   ONLY from committed numbers — invent nothing.
 
 ## Scope discipline
-- Work ONLY on the session you were given. Do not implement future sessions or
-  Phase 2 (multireactor, io-uring, the writeup). Leave `todo!()` where the spec
-  defers to a later session.
-- End every session by running cargo build + clippy + test, listing changes,
-  and STOPPING.
+Work ONLY on the given session. End with cargo build+clippy+test, list changes, STOP.
 
 ## Commit discipline
 - Commit after each file is complete and the crate compiles.
