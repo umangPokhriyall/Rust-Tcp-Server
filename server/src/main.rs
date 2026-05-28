@@ -17,6 +17,7 @@ use core::{App, Method, Request, Response, ServerConfig, StatusCode};
 use models::epoll::{EpollEt, EpollLt};
 use models::event_loop::EventLoop;
 use models::forking::Forking;
+use models::io_uring::IoUring;
 use models::iterative::Iterative;
 use models::multireactor::Multireactor;
 use models::poll::Poll;
@@ -57,10 +58,7 @@ fn main() {
         "epoll-et" => Box::new(EpollEt::new(cli.verbose)),
         "event-loop" => Box::new(EventLoop::new(cli.verbose)),
         "multireactor" => Box::new(Multireactor::new(cli.verbose)),
-        "io-uring" => {
-            eprintln!("model 'io-uring' is Phase 2 session 2 — not implemented yet");
-            std::process::exit(1);
-        }
+        "io-uring" => Box::new(IoUring::new(cli.verbose)),
         other => {
             eprintln!("unknown model '{other}' — expected one of: iterative, \
                        forking, preforked, thread-per-conn, thread-pool, \

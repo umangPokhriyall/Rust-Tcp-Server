@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Phase 1 allowlist for `server`: core, socket2, libc. Nothing else.
+# Phase 1 allowlist for `server`: core, socket2, libc. Phase 2 §2 adds io-uring
+# (the raw `io-uring` crate, never `tokio-uring`/`tokio`). Nothing else.
 core = { path = "../core" }
 # libc — fork, waitpid, epoll, poll, accept4, fcntl, signals (the `sys` layer).
 libc = "0.2"
+# io-uring (raw, Phase 2 §5) — multishot accept, provided buffer rings, batched
+# submission. The completion-based backend for `models::io_uring`.
+io-uring = "0.7"

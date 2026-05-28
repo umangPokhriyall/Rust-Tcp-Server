@@ -251,3 +251,42 @@ fn event_loop_conformance() {
 fn multireactor_conformance() {
     run_conformance("multireactor");
 }
+
+/// `io-uring` is kernel-gated (≥ 5.19, §5). On older kernels the server exits
+/// non-zero with `io_uring unavailable: kernel X.Y < 5.19`; the test records
+/// N/A and passes instead of failing — the same N/A convention `bench/run.sh`
+/// uses for the sweep (§6).
+#[test]
+fn io_uring_conformance() {
+    if let Some(reason) = io_uring_unavailable() {
+        eprintln!("io-uring: skipping conformance — {reason}");
+        return;
+    }
+    run_conformance("io-uring");
+}
+
+/// Returns `Some(reason)` if the host kernel cannot run io_uring per §5; the
+/// check is the same `uname.release` parse the server itself runs at startup,
+/// duplicated here so the test can skip without spawning a binary that exits
+/// non-zero.
+fn io_uring_unavailable() -> Option<String> {
+    let mut un: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut un) } != 0 {
+        return Some("uname() failed".to_string());
+    }
+    let raw = un.release.as_ptr();
+    let mut len = 0usize;
+    while len < un.release.len() && unsafe { *raw.add(len) } != 0 {
+        len += 1;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(raw as *const u8, len) };
+    let s = std::str::from_utf8(bytes).unwrap_or("");
+    let mut parts = s.split(|c: char| !c.is_ascii_digit());
+    let major: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    if (major, minor) < (5, 19) {
+        Some(format!("kernel {major}.{minor} < 5.19"))
+    } else {
+        None
+    }
+}
