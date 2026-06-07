@@ -110,6 +110,19 @@ LOADGEN_WRAP="${LOADGEN_WRAP:-bench/_loadgen_wrap.sh}"
 export LOADGEN_BIN
 export LOADGEN_STACK_KIB="${LOADGEN_STACK_KIB:-128}"
 
+# Optional NUMA pinning (Phase 3 §3). When SERVER_NUMA_NODE / LOADGEN_NUMA_NODE
+# are set, the respective process is wrapped with
+# `numactl --cpunodebind=N --membind=N` to isolate server and loadgen on
+# disjoint sockets. Unset = empty prefix, i.e. byte-identical to prior runs.
+SERVER_NUMA=()
+LOADGEN_NUMA=()
+if [[ -n "${SERVER_NUMA_NODE:-}" ]]; then
+    SERVER_NUMA=(numactl --cpunodebind="$SERVER_NUMA_NODE" --membind="$SERVER_NUMA_NODE")
+fi
+if [[ -n "${LOADGEN_NUMA_NODE:-}" ]]; then
+    LOADGEN_NUMA=(numactl --cpunodebind="$LOADGEN_NUMA_NODE" --membind="$LOADGEN_NUMA_NODE")
+fi
+
 # ----- Process lifecycle -----
 
 SERVER_PID=""
@@ -145,7 +158,7 @@ wait_for_port() {
 start_server() {
     local model=$1 port=$2
     local log="$RESULTS_DIR/server_${model}.log"
-    "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
+    "${SERVER_NUMA[@]}" "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
         >"$log" 2>&1 &
     SERVER_PID=$!
     if ! wait_for_port "$port"; then
@@ -186,13 +199,13 @@ run_sweep_one() {
         if [[ "$PERF" == "1" && "$c" == "100" ]] && command -v perf >/dev/null 2>&1; then
             timeout --kill-after=5 "$POINT_BUDGET" \
                 perf stat -o "$RESULTS_DIR/perf_${model}_c${c}.txt" -- \
-                "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
+                "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
                     --rate "$rate" --connections "$c" \
                     --duration "$DURATION" --out "$csv" \
                     >>"$RESULTS_DIR/server_${model}.log" 2>&1 || rc=$?
         else
             timeout --kill-after=5 "$POINT_BUDGET" \
-                "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
+                "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
                     --rate "$rate" --connections "$c" \
                     --duration "$DURATION" --out "$csv" \
                     >>"$RESULTS_DIR/server_${model}.log" 2>&1 || rc=$?
@@ -258,7 +271,7 @@ soak_one() {
     ) &
     local sampler_pid=$!
 
-    "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
+    "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
         --rate "$SOAK_RATE" --connections "$SOAK_CONNS" \
         --duration "$DURATION" --out "$csv" \
         >>"$RESULTS_DIR/server_${model}.log" 2>&1 \

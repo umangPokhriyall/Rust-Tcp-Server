@@ -39,6 +39,16 @@ LOADGEN_WRAP="${LOADGEN_WRAP:-bench/_loadgen_wrap.sh}"
 export LOADGEN_BIN
 export LOADGEN_STACK_KIB="${LOADGEN_STACK_KIB:-128}"
 
+# Optional NUMA pinning (Phase 3 §3). Unset = empty prefix, byte-identical.
+SERVER_NUMA=()
+LOADGEN_NUMA=()
+if [[ -n "${SERVER_NUMA_NODE:-}" ]]; then
+    SERVER_NUMA=(numactl --cpunodebind="$SERVER_NUMA_NODE" --membind="$SERVER_NUMA_NODE")
+fi
+if [[ -n "${LOADGEN_NUMA_NODE:-}" ]]; then
+    LOADGEN_NUMA=(numactl --cpunodebind="$LOADGEN_NUMA_NODE" --membind="$LOADGEN_NUMA_NODE")
+fi
+
 OUT="$RESULTS_DIR/multireactor_scaling.csv"
 echo "workers,connections,rate,throughput_rps,p50,p99,p999" >"$OUT"
 
@@ -78,7 +88,7 @@ for W in $WORKERS_LADDER; do
     csv="$RESULTS_DIR/scaling_w${W}.csv"
     : >"$csv"
     echo "=== scaling: workers=$W conns=$SCALING_CONNS rate=$SCALING_RATE port=$port dur=${DURATION}s ==="
-    "$SERVER_BIN" --model multireactor --port "$port" \
+    "${SERVER_NUMA[@]}" "$SERVER_BIN" --model multireactor --port "$port" \
         --assets-dir "$ASSETS_DIR" --workers "$W" \
         >"$log" 2>&1 &
     SERVER_PID=$!
@@ -90,7 +100,7 @@ for W in $WORKERS_LADDER; do
     sleep 0.2
     rc=0
     timeout --kill-after=5 "$POINT_BUDGET" \
-        "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "multireactor-w${W}" \
+        "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "multireactor-w${W}" \
             --rate "$SCALING_RATE" --connections "$SCALING_CONNS" \
             --duration "$DURATION" --out "$csv" \
             >>"$log" 2>&1 || rc=$?

@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# bench/profile.sh — Phase 2 §7 profiling harness.
+# bench/profile.sh — Phase 2 §7 / Phase 3 §4 profiling harness.
 #
-# Captures per-request syscall counts and context-switch counts for the
-# three signal models: epoll-et (single-thread), multireactor (default
-# workers), io-uring (single ring, single thread).
-#
-# Method (the documented fallback path — see profiles/README.md):
+# Captures, for all 11 models (Phase 3 §4a), three independent passes:
 #   1. syscalls/req  : run the server under `strace -c -f -- server ...`,
 #                      drive a fixed open-loop request budget, send SIGINT,
 #                      let strace flush the summary to a file. Divide
@@ -14,16 +10,29 @@
 #                      /proc/<pid>/status's voluntary_ctxt_switches and
 #                      nonvoluntary_ctxt_switches before and after the
 #                      load, divide the delta by completed requests.
+#   3. TMA top-down  : (Phase 3 §4b) a dedicated steady-state run — start the
+#                      server natively, drive a fixed loadgen load, and sample
+#                      the server PID with `perf stat -M TopdownL1,TopdownL2
+#                      -p <pid> -- sleep <dur>`, writing perf_<model>.txt.
+#                      For the signal models (epoll-et, multireactor,
+#                      io-uring) a second TMA capture runs under C10K-level
+#                      load → perf_<model>_c10k.txt (Phase 3 §4c).
 #
-# Top-down microarchitecture (perf stat --topdown) is unavailable: this
-# host has /proc/sys/kernel/perf_event_paranoid = 4, which forbids all
-# event access for non-CAP_PERFMON users. Documented in profiles/README.md.
+# The TMA pass needs PMU access (perf_event_paranoid <= 0 / CAP_PERFMON),
+# available on the bare-metal host. Where perf is missing or denied (e.g. a
+# laptop with perf_event_paranoid = 4), the TMA capture writes a diagnostic
+# note and returns success so the strace/ctx passes are unaffected; the perf
+# path is validated on metal.
 #
 # Outputs to bench/results/profiles/:
 #   strace_<model>.txt              — `strace -c -f` summary
 #   ctx_<model>.txt                 — pre/post /proc/<pid>/status deltas
+#   perf_<model>.txt                — perf stat TopdownL1,TopdownL2 (steady)
+#   perf_<model>_c10k.txt           — TMA under C10K load (signal models)
 #   loadgen_strace_<model>.csv      — loadgen results under strace
 #   loadgen_ctx_<model>.csv         — loadgen results without strace
+#   loadgen_tma_<model>.csv         — loadgen results during TMA capture
+#   loadgen_tma_c10k_<model>.csv    — loadgen results during C10K TMA capture
 #   server_<model>.log              — server stdout/stderr
 #   summary.csv                     — derived syscalls/req, ctxs/req table
 #
@@ -42,6 +51,22 @@ LOADGEN_WRAP="${LOADGEN_WRAP:-bench/_loadgen_wrap.sh}"
 export LOADGEN_BIN
 export LOADGEN_STACK_KIB="${LOADGEN_STACK_KIB:-128}"
 
+# Optional NUMA pinning (Phase 3 §3). Unset = empty prefix, byte-identical.
+SERVER_NUMA=()
+LOADGEN_NUMA=()
+if [[ -n "${SERVER_NUMA_NODE:-}" ]]; then
+    SERVER_NUMA=(numactl --cpunodebind="$SERVER_NUMA_NODE" --membind="$SERVER_NUMA_NODE")
+fi
+if [[ -n "${LOADGEN_NUMA_NODE:-}" ]]; then
+    LOADGEN_NUMA=(numactl --cpunodebind="$LOADGEN_NUMA_NODE" --membind="$LOADGEN_NUMA_NODE")
+fi
+
+# All 11 models, run when no positional model list is given (Phase 3 §4a).
+ALL_MODELS=(iterative forking preforked thread-per-conn thread-pool poll epoll-lt epoll-et event-loop multireactor io-uring)
+
+# Signal models get a second TMA capture under C10K-level load (Phase 3 §4c).
+SIGNAL_MODELS="${SIGNAL_MODELS:-epoll-et multireactor io-uring}"
+
 # Workload knobs. Defaults chosen so the strace-attached server can keep
 # up (low rate + low concurrency) and the request budget is large enough
 # that the per-request denominators are statistically meaningful but the
@@ -57,7 +82,28 @@ CTX_RATE="${CTX_RATE:-2000}"
 CTX_CONNS="${CTX_CONNS:-100}"
 CTX_DURATION="${CTX_DURATION:-30}"
 
-MODELS=("${@:-epoll-et multireactor io-uring}")
+# TMA top-down capture. A dedicated steady-state run: perf samples the server
+# PID for TMA_DURATION while loadgen supplies a fixed mid-range load.
+TMA_RATE="${TMA_RATE:-20000}"
+TMA_CONNS="${TMA_CONNS:-100}"
+TMA_DURATION="${TMA_DURATION:-20}"
+
+# C10K-level TMA capture (signal models only). Mirrors bench/c10k.sh: 10000
+# connections, with the server's max-connections bumped so event-loop models
+# accept them.
+TMA_C10K_RATE="${TMA_C10K_RATE:-50000}"
+TMA_C10K_CONNS="${TMA_C10K_CONNS:-10000}"
+TMA_C10K_DURATION="${TMA_C10K_DURATION:-20}"
+TMA_C10K_MAX_CONNS="${TMA_C10K_MAX_CONNS:-16384}"
+
+# Seconds to let loadgen reach steady state before the perf window opens.
+TMA_WARMUP="${TMA_WARMUP:-3}"
+
+if [[ $# -gt 0 ]]; then
+    MODELS=("$@")
+else
+    MODELS=("${ALL_MODELS[@]}")
+fi
 PORT_BASE="${PORT_BASE:-31000}"
 
 mkdir -p "$OUT"
@@ -117,7 +163,7 @@ start_under_strace() {
     # strace as parent → ptrace_scope=1 is satisfied. -f follows clones so
     # multireactor's worker threads are traced too. -c gives the summary.
     strace -c -f -o "$strace_out" -- \
-        "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
+        "${SERVER_NUMA[@]}" "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
         >"$server_log" 2>&1 &
     STRACE_PID=$!
     # The strace child is the server. Wait briefly for it to appear, then
@@ -151,7 +197,7 @@ stop_under_strace() {
 
 start_native() {
     local model=$1 port=$2 server_log=$3
-    "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
+    "${SERVER_NUMA[@]}" "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
         >"$server_log" 2>&1 &
     SERVER_PID=$!
     wait_for_port "$port"
@@ -170,10 +216,68 @@ stop_native() {
     fi
 }
 
+is_signal_model() {
+    local m=$1 s
+    for s in $SIGNAL_MODELS; do
+        [[ "$m" == "$s" ]] && return 0
+    done
+    return 1
+}
+
+# TMA top-down capture (Phase 3 §4b/§4c). Starts the server natively, drives a
+# fixed loadgen load in the background, then samples the server PID with
+# `perf stat -M TopdownL1,TopdownL2 -p <pid> -- sleep <dur>`. The throughput
+# sweep/c10k/scaling runs stay perf-free; only this dedicated run uses perf.
+#
+# perf access is denied on hosts with perf_event_paranoid > 0 and no
+# CAP_PERFMON (e.g. the laptop). On any such failure this writes a diagnostic
+# note to the output file and returns 0, so the strace/ctx passes — which do
+# not depend on perf — are never broken. The path is validated on metal.
+tma_capture() {
+    local model=$1 port=$2 rate=$3 conns=$4 dur=$5
+    local out=$6 srv_log=$7 lg_csv=$8 max_conns="${9:-}"
+
+    : >"$out"; : >"$lg_csv"
+
+    if ! command -v perf >/dev/null 2>&1; then
+        echo "# perf not found on PATH — TMA capture skipped (validated on metal host)." >"$out"
+        return 0
+    fi
+
+    local extra=()
+    [[ -n "$max_conns" ]] && extra=(--max-connections "$max_conns")
+    "${SERVER_NUMA[@]}" "$SERVER_BIN" --model "$model" --port "$port" \
+        --assets-dir "$ASSETS_DIR" "${extra[@]}" >"$srv_log" 2>&1 &
+    SERVER_PID=$!
+    if ! wait_for_port "$port"; then
+        echo "# server failed to come up for TMA capture; see $srv_log" >"$out"
+        stop_native "$SERVER_PID"
+        return 0
+    fi
+    sleep 0.2
+
+    # Background loadgen supplies steady-state load across the perf window.
+    "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
+        --rate "$rate" --connections "$conns" \
+        --duration "$((dur + TMA_WARMUP + 5))" --out "$lg_csv" \
+        >>"$srv_log" 2>&1 &
+    local lg_pid=$!
+    sleep "$TMA_WARMUP"
+
+    perf stat -M TopdownL1,TopdownL2 -p "$SERVER_PID" -o "$out" -- sleep "$dur" \
+        || echo "# perf stat returned nonzero (perf_event_paranoid / no PMU?)." >>"$out"
+
+    kill "$lg_pid" 2>/dev/null || true
+    wait "$lg_pid" 2>/dev/null || true
+    stop_native "$SERVER_PID"
+}
+
 capture_model() {
     local model=$1 idx=$2
-    local strace_port=$((PORT_BASE + idx*2))
-    local ctx_port=$((PORT_BASE + idx*2 + 1))
+    local strace_port=$((PORT_BASE + idx*4))
+    local ctx_port=$((PORT_BASE + idx*4 + 1))
+    local tma_port=$((PORT_BASE + idx*4 + 2))
+    local tma_c10k_port=$((PORT_BASE + idx*4 + 3))
 
     local strace_out="$OUT/strace_${model}.txt"
     local ctx_out="$OUT/ctx_${model}.txt"
@@ -187,7 +291,7 @@ capture_model() {
     echo "=== $model: strace -c -f (rate=$STRACE_RATE c=$STRACE_CONNS dur=${STRACE_DURATION}s port=$strace_port) ==="
     start_under_strace "$model" "$strace_port" "$strace_out" "$s_log"
     sleep 0.2
-    "$LOADGEN_WRAP" --target "127.0.0.1:$strace_port" --model "$model" \
+    "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$strace_port" --model "$model" \
         --rate "$STRACE_RATE" --connections "$STRACE_CONNS" \
         --duration "$STRACE_DURATION" --out "$strace_csv" \
         >>"$s_log" 2>&1 || echo "  loadgen exited nonzero (strace pass)"
@@ -197,7 +301,7 @@ capture_model() {
     start_native "$model" "$ctx_port" "$c_log"
     sleep 0.2
     local before; before=$(sum_ctxt "$SERVER_PID")
-    "$LOADGEN_WRAP" --target "127.0.0.1:$ctx_port" --model "$model" \
+    "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$ctx_port" --model "$model" \
         --rate "$CTX_RATE" --connections "$CTX_CONNS" \
         --duration "$CTX_DURATION" --out "$ctx_csv" \
         >>"$c_log" 2>&1 || echo "  loadgen exited nonzero (ctx pass)"
@@ -213,15 +317,21 @@ capture_model() {
         echo "delta  $((av-bv)) $((an-bn)) $((at-bt))"
     } >"$ctx_out"
     stop_native "$SERVER_PID"
+
+    echo "=== $model: TMA top-down (rate=$TMA_RATE c=$TMA_CONNS dur=${TMA_DURATION}s port=$tma_port) ==="
+    tma_capture "$model" "$tma_port" "$TMA_RATE" "$TMA_CONNS" "$TMA_DURATION" \
+        "$OUT/perf_${model}.txt" "$OUT/server_tma_${model}.log" \
+        "$OUT/loadgen_tma_${model}.csv"
+
+    if is_signal_model "$model"; then
+        echo "=== $model: TMA top-down C10K (rate=$TMA_C10K_RATE c=$TMA_C10K_CONNS dur=${TMA_C10K_DURATION}s port=$tma_c10k_port) ==="
+        tma_capture "$model" "$tma_c10k_port" "$TMA_C10K_RATE" "$TMA_C10K_CONNS" "$TMA_C10K_DURATION" \
+            "$OUT/perf_${model}_c10k.txt" "$OUT/server_tma_c10k_${model}.log" \
+            "$OUT/loadgen_tma_c10k_${model}.csv" "$TMA_C10K_MAX_CONNS"
+    fi
 }
 
 # ----- main -----
-
-# Reflow MODELS from positional args without falling foul of "${@:-...}"
-# splitting the default string token.
-if [[ ${#MODELS[@]} -eq 1 && "${MODELS[0]}" == "epoll-et multireactor io-uring" ]]; then
-    MODELS=(epoll-et multireactor io-uring)
-fi
 
 SERVER_PID=""
 STRACE_PID=""

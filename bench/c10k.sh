@@ -57,6 +57,16 @@ LOADGEN_WRAP="${LOADGEN_WRAP:-bench/_loadgen_wrap.sh}"
 export LOADGEN_BIN
 export LOADGEN_STACK_KIB="${LOADGEN_STACK_KIB:-128}"
 
+# Optional NUMA pinning (Phase 3 §3). Unset = empty prefix, byte-identical.
+SERVER_NUMA=()
+LOADGEN_NUMA=()
+if [[ -n "${SERVER_NUMA_NODE:-}" ]]; then
+    SERVER_NUMA=(numactl --cpunodebind="$SERVER_NUMA_NODE" --membind="$SERVER_NUMA_NODE")
+fi
+if [[ -n "${LOADGEN_NUMA_NODE:-}" ]]; then
+    LOADGEN_NUMA=(numactl --cpunodebind="$LOADGEN_NUMA_NODE" --membind="$LOADGEN_NUMA_NODE")
+fi
+
 SUMMARY="$RESULTS_DIR/c10k_summary.csv"
 echo "model,connections,rate,duration_s,first_rss_kib,last_rss_kib,first_fds,last_fds,max_zombies,ctx_voluntary,ctx_involuntary,verdict" >"$SUMMARY"
 
@@ -99,7 +109,7 @@ for model in $C10K_MODELS; do
     server_log="$RESULTS_DIR/c10k_server_${model}.log"
     : >"$csv"
     echo "=== c10k: $model conns=$C10K_CONNS rate=$C10K_RATE port=$port dur=${DURATION}s ==="
-    "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
+    "${SERVER_NUMA[@]}" "$SERVER_BIN" --model "$model" --port "$port" --assets-dir "$ASSETS_DIR" \
         --max-connections "$C10K_MAX_CONNS" \
         >"$server_log" 2>&1 &
     SERVER_PID=$!
@@ -137,7 +147,7 @@ for model in $C10K_MODELS; do
 
     rc=0
     timeout --kill-after=5 "$POINT_BUDGET" \
-        "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
+        "${LOADGEN_NUMA[@]}" "$LOADGEN_WRAP" --target "127.0.0.1:$port" --model "$model" \
             --rate "$C10K_RATE" --connections "$C10K_CONNS" \
             --duration "$DURATION" --out "$csv" \
             >>"$server_log" 2>&1 || rc=$?
