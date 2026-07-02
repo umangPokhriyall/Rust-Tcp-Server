@@ -13,7 +13,12 @@
 #   SCALING_CONNS    fixed concurrency (default 1000)
 #   SCALING_RATE     fixed offered rate (default 80000)
 #   PORT             starting TCP port (default 19080)
-#   WORKERS_LADDER   space-separated worker counts (default 1 2 4 8)
+#   WORKERS_LADDER   space-separated worker counts. Default: auto-derived from
+#                    $(nproc) — powers of two below the core count, plus the
+#                    core count itself as the top rung. 8 cores → "1 2 4 8";
+#                    24 cores → "1 2 4 8 16 24" (Phase 3 §1, §5 DoD #5). The
+#                    top rung is always the real core count, never a fabricated
+#                    one. Set explicitly to override.
 
 set -euo pipefail
 
@@ -25,7 +30,20 @@ POINT_BUDGET="${POINT_BUDGET:-$((DURATION + 90))}"
 SCALING_CONNS="${SCALING_CONNS:-1000}"
 SCALING_RATE="${SCALING_RATE:-80000}"
 PORT="${PORT:-19080}"
-WORKERS_LADDER="${WORKERS_LADDER:-1 2 4 8}"
+
+# Worker ladder: auto-derive from the core count unless explicitly set (Phase 3
+# §5 DoD #5). Powers of two strictly below $(nproc), then $(nproc) as the top
+# rung — so a power-of-two core count yields no duplicate and a non-power-of-two
+# count (e.g. 24) gets its exact top rung. Reproduces the 8-core laptop's
+# "1 2 4 8" and gives "1 2 4 8 16 24" on m4.metal.large.
+if [[ -z "${WORKERS_LADDER:-}" ]]; then
+    ncpu="$(nproc 2>/dev/null || echo 8)"
+    ladder=()
+    w=1
+    while (( w < ncpu )); do ladder+=("$w"); w=$(( w * 2 )); done
+    ladder+=("$ncpu")
+    WORKERS_LADDER="${ladder[*]}"
+fi
 SERVER_BIN="${SERVER_BIN:-target/release/server}"
 LOADGEN_BIN="${LOADGEN_BIN:-target/release/loadgen}"
 RESULTS_DIR="${RESULTS_DIR:-bench/results}"
