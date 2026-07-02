@@ -15,7 +15,14 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-/// Grab a free port by binding to :0 and immediately releasing it.
+/// Grab a likely-free port by binding to :0 and immediately releasing it.
+///
+/// This is inherently racy: the port is released before the server rebinds it,
+/// so under a parallel test run a concurrent call (or the loadgen, or any other
+/// process) can be handed the same ephemeral port in the gap. That race is not
+/// resolved here — it is absorbed by `spawn_server`, which retries on a fresh
+/// port until the server proves it owns one. Do not rely on this port being
+/// free by the time you use it.
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -40,20 +47,75 @@ impl Drop for ServerGuard {
 }
 
 fn spawn_server(model: &str) -> ServerGuard {
-    let port = free_port();
+    // `free_port` races (see its doc): a concurrent test can grab the same
+    // ephemeral port before this server binds it. The loser then either exits
+    // with EADDRINUSE — the single-socket models set neither SO_REUSEADDR nor
+    // SO_REUSEPORT, so a colliding bind fails hard — or a later connect lands on
+    // the other test's transient probe listener and gets reset. Both are
+    // absorbed here: retry the whole spawn on a fresh port until the server
+    // proves it exclusively owns the port by answering a real request. This is
+    // what makes the suite safe to run in parallel (default) and on the metal
+    // box, not just under `--test-threads=1`.
+    const ATTEMPTS: usize = 25;
     let assets = format!("{}/assets", env!("CARGO_MANIFEST_DIR"));
-    let child = Command::new(env!("CARGO_BIN_EXE_server"))
-        .args([
-            "--model",
-            model,
-            "--port",
-            &port.to_string(),
-            "--assets-dir",
-            &assets,
-        ])
-        .spawn()
-        .expect("spawn server binary");
-    ServerGuard { child, port }
+    for _ in 0..ATTEMPTS {
+        let port = free_port();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_server"))
+            .args([
+                "--model",
+                model,
+                "--port",
+                &port.to_string(),
+                "--assets-dir",
+                &assets,
+            ])
+            .spawn()
+            .expect("spawn server binary");
+        if server_owns_port(&mut child, port) {
+            return ServerGuard { child, port };
+        }
+        // Lost the port (child exited on EADDRINUSE, or never answered as ours).
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    panic!("[{model}] server never bound an exclusive port after {ATTEMPTS} attempts");
+}
+
+/// Readiness check that distinguishes *our* server from a stray probe listener.
+///
+/// A bare TCP connect is not enough: another test's `free_port` listener also
+/// accepts connections (into its backlog) without ever answering, so a connect
+/// can succeed against a socket that is not our server at all. This polls until
+/// the child either exits (its bind lost the race) or answers `GET /` with a
+/// `200` status line — proof the port is ours. Returns false on early exit or
+/// deadline so `spawn_server` retries on a fresh port.
+fn server_owns_port(child: &mut Child, port: u16) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        // Server process exited — e.g. EADDRINUSE from a colliding port pick.
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return false;
+        }
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+            if stream
+                .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .is_ok()
+            {
+                let mut buf = [0u8; 16];
+                // A real server answers "HTTP/1.1 200 ..."; a stray probe
+                // listener returns EOF/reset or nothing — fall through and retry.
+                if let Ok(n) = stream.read(&mut buf) {
+                    if n >= 12 && buf.starts_with(b"HTTP/1.1 200") {
+                        return true;
+                    }
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
 }
 
 /// Connect to the server, retrying until it is accepting (or a deadline).
