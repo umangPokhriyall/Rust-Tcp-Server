@@ -10,12 +10,19 @@
 #                      /proc/<pid>/status's voluntary_ctxt_switches and
 #                      nonvoluntary_ctxt_switches before and after the
 #                      load, divide the delta by completed requests.
-#   3. TMA top-down  : (Phase 3 §4b) a dedicated steady-state run — start the
+#   3. pipeline      : (Phase 3 §4b) a dedicated steady-state run — start the
 #                      server natively, drive a fixed loadgen load, and sample
-#                      the server PID with `perf stat -M TopdownL1,TopdownL2
-#                      -p <pid> -- sleep <dur>`, writing perf_<model>.txt.
+#                      the server PID with `perf stat -M <group> -p <pid> --
+#                      sleep <dur>`, writing perf_<model>.txt. The metric group
+#                      is vendor-selected: on Intel the Top-down Microarchitecture
+#                      Analysis groups (TopdownL1,TopdownL2); on AMD the Zen
+#                      pipeline-utilization group named in $PERF_METRIC_GROUP
+#                      (the architectural counterpart to Intel TMA, discovered
+#                      on the box via `perf list metricgroups`, Phase 3 §A.6 —
+#                      NOT Intel TMA relabeled). $PERF_METRIC_GROUP overrides the
+#                      auto-selected group on any vendor when set.
 #                      For the signal models (epoll-et, multireactor,
-#                      io-uring) a second TMA capture runs under C10K-level
+#                      io-uring) a second capture runs under C10K-level
 #                      load → perf_<model>_c10k.txt (Phase 3 §4c).
 #
 # The TMA pass needs PMU access (perf_event_paranoid <= 0 / CAP_PERFMON),
@@ -27,8 +34,8 @@
 # Outputs to bench/results/profiles/:
 #   strace_<model>.txt              — `strace -c -f` summary
 #   ctx_<model>.txt                 — pre/post /proc/<pid>/status deltas
-#   perf_<model>.txt                — perf stat TopdownL1,TopdownL2 (steady)
-#   perf_<model>_c10k.txt           — TMA under C10K load (signal models)
+#   perf_<model>.txt                — perf stat pipeline metric group (steady)
+#   perf_<model>_c10k.txt           — pipeline capture under C10K load (signal models)
 #   loadgen_strace_<model>.csv      — loadgen results under strace
 #   loadgen_ctx_<model>.csv         — loadgen results without strace
 #   loadgen_tma_<model>.csv         — loadgen results during TMA capture
@@ -98,6 +105,26 @@ TMA_C10K_MAX_CONNS="${TMA_C10K_MAX_CONNS:-16384}"
 
 # Seconds to let loadgen reach steady state before the perf window opens.
 TMA_WARMUP="${TMA_WARMUP:-3}"
+
+# Vendor-aware pipeline metric group (Phase 3 §4, §A.6).
+#
+# Intel's `TopdownL1,TopdownL2` metric groups exist only on Intel silicon;
+# running them verbatim on AMD Zen errors or silently misleads. This resolves
+# the group used by the perf pass:
+#   - $PERF_METRIC_GROUP set  → use it verbatim on any vendor (the on-box path:
+#     the human reads `perf list metricgroups` on the EPYC box per §A.6, picks
+#     the Zen pipeline-utilization group, and passes it in).
+#   - unset + AMD CPU          → no Intel default exists; the group MUST be
+#     supplied. The perf pass is skipped with a diagnostic pointing at §A.6
+#     rather than running a group that does not exist on Zen.
+#   - unset + non-AMD CPU      → fall back to the Intel TMA groups (laptop path).
+if [[ -n "${PERF_METRIC_GROUP:-}" ]]; then
+    :                                    # caller-supplied group wins on any vendor
+elif grep -qi amd /proc/cpuinfo 2>/dev/null; then
+    PERF_METRIC_GROUP=""
+else
+    PERF_METRIC_GROUP="TopdownL1,TopdownL2"
+fi
 
 if [[ $# -gt 0 ]]; then
     MODELS=("$@")
@@ -224,15 +251,17 @@ is_signal_model() {
     return 1
 }
 
-# TMA top-down capture (Phase 3 §4b/§4c). Starts the server natively, drives a
-# fixed loadgen load in the background, then samples the server PID with
-# `perf stat -M TopdownL1,TopdownL2 -p <pid> -- sleep <dur>`. The throughput
-# sweep/c10k/scaling runs stay perf-free; only this dedicated run uses perf.
+# Pipeline metric-group capture (Phase 3 §4b/§4c). Starts the server natively,
+# drives a fixed loadgen load in the background, then samples the server PID with
+# `perf stat -M "$PERF_METRIC_GROUP" -p <pid> -- sleep <dur>`. The group is the
+# vendor-resolved value from the top of the script. The throughput sweep/c10k/
+# scaling runs stay perf-free; only this dedicated run uses perf.
 #
 # perf access is denied on hosts with perf_event_paranoid > 0 and no
-# CAP_PERFMON (e.g. the laptop). On any such failure this writes a diagnostic
-# note to the output file and returns 0, so the strace/ctx passes — which do
-# not depend on perf — are never broken. The path is validated on metal.
+# CAP_PERFMON (e.g. the laptop). On any such failure — and on AMD with no
+# $PERF_METRIC_GROUP supplied — this writes a diagnostic note to the output file
+# and returns 0, so the strace/ctx passes, which do not depend on perf, are
+# never broken. The perf path is validated on metal.
 tma_capture() {
     local model=$1 port=$2 rate=$3 conns=$4 dur=$5
     local out=$6 srv_log=$7 lg_csv=$8 max_conns="${9:-}"
@@ -240,7 +269,17 @@ tma_capture() {
     : >"$out"; : >"$lg_csv"
 
     if ! command -v perf >/dev/null 2>&1; then
-        echo "# perf not found on PATH — TMA capture skipped (validated on metal host)." >"$out"
+        echo "# perf not found on PATH — pipeline capture skipped (validated on metal host)." >"$out"
+        return 0
+    fi
+
+    if [[ -z "$PERF_METRIC_GROUP" ]]; then
+        {
+            echo "# AMD CPU detected and no \$PERF_METRIC_GROUP supplied — pipeline capture skipped."
+            echo "# Intel TopdownL1,TopdownL2 do not exist on AMD Zen. Per Phase 3 §A.6, run"
+            echo "#   perf list metricgroups | grep -iE 'pipeline|frontend|backend|retir|spec'"
+            echo "# on the box, then re-run with PERF_METRIC_GROUP='<AMD Zen pipeline group>'."
+        } >"$out"
         return 0
     fi
 
@@ -264,8 +303,8 @@ tma_capture() {
     local lg_pid=$!
     sleep "$TMA_WARMUP"
 
-    perf stat -M TopdownL1,TopdownL2 -p "$SERVER_PID" -o "$out" -- sleep "$dur" \
-        || echo "# perf stat returned nonzero (perf_event_paranoid / no PMU?)." >>"$out"
+    perf stat -M "$PERF_METRIC_GROUP" -p "$SERVER_PID" -o "$out" -- sleep "$dur" \
+        || echo "# perf stat returned nonzero (perf_event_paranoid / no PMU / bad metric group '$PERF_METRIC_GROUP'?)." >>"$out"
 
     kill "$lg_pid" 2>/dev/null || true
     wait "$lg_pid" 2>/dev/null || true
