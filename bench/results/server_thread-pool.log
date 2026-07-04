@@ -1,0 +1,2 @@
+thread-pool: 12 workers on http://0.0.0.0:18104
+loadgen: 707 ok, 499293 errors, throughput 70.7 rps, p50 213µs p99 10108927µs p99.99 10117119µs max 10117119µs

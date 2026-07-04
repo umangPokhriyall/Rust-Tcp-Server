@@ -1,0 +1,2 @@
+iterative: listening on http://0.0.0.0:31001
+loadgen: 20641 ok, 39359 errors, throughput 688.0 rps, p50 83µs p99 199µs p99.99 224µs max 226µs

@@ -1,0 +1,26 @@
+# started on Sat Jul  4 10:24:34 2026
+
+
+ Performance counter stats for process id '1222697':
+
+       232,726,832      ex_ret_brn_misp                  #      0.4 %  bad_speculation_mispredicts
+                                                  #      0.0 %  bad_speculation_pipeline_restarts
+    15,250,074,971      de_src_op_disp.all                                                    
+           611,656      resyncs_or_nc_redirects                                               
+    19,230,137,483      ls_not_halted_cyc                                                     
+    14,783,873,943      ex_ret_ops                                                            
+       843,338,277      ex_no_retire.load_not_complete   #      2.5 %  backend_bound_cpu      
+                                                  #     16.0 %  backend_bound_memory     (0.00%)
+     1,657,160,921      de_no_dispatch_per_slot.backend_stalls                                        (0.00%)
+       974,344,485      ex_no_retire.not_complete                                               (0.00%)
+     1,497,345,411      ls_not_halted_cyc                                                       (0.00%)
+       230,844,749      ex_ret_ucode_ops                 #      9.9 %  retiring_fastpath      
+                                                  #      2.6 %  retiring_microcode       (0.00%)
+     1,484,964,602      ls_not_halted_cyc                                                       (0.00%)
+     1,113,965,305      ex_ret_ops                                                              (0.00%)
+     4,592,105,743      de_no_dispatch_per_slot.no_ops_from_frontend #     12.6 %  frontend_bound_bandwidth  (0.00%)
+       621,686,539      cpu/de_no_dispatch_per_slot.no_ops_from_frontend,cmask=0x6/ #     54.5 %  frontend_bound_latency   (0.00%)
+     1,139,737,378      ls_not_halted_cyc                                                       (0.00%)
+
+      20.002347525 seconds time elapsed
+

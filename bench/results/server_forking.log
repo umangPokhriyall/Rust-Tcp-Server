@@ -1,0 +1,2 @@
+forking: listening on http://0.0.0.0:18089
+loadgen: 50567 ok, 449433 errors, throughput 5056.7 rps, p50 74µs p99 118µs p99.99 200µs max 278µs

@@ -1,0 +1,29 @@
+# started on Sat Jul  4 10:34:24 2026
+
+
+ Performance counter stats for process id '1245844':
+
+       234,222,496      ex_ret_brn_misp                  #      0.3 %  bad_speculation_mispredicts
+                                                  #      0.0 %  bad_speculation_pipeline_restarts
+    15,087,574,844      de_src_op_disp.all                                                    
+           658,384      resyncs_or_nc_redirects                                               
+    17,922,124,011      ls_not_halted_cyc                                                     
+    14,767,818,989      ex_ret_ops                                                            
+     <not counted>      ex_no_retire.load_not_complete                                          (0.00%)
+     <not counted>      de_no_dispatch_per_slot.backend_stalls                                        (0.00%)
+     <not counted>      ex_no_retire.not_complete                                               (0.00%)
+     <not counted>      ls_not_halted_cyc                                                       (0.00%)
+       414,778,490      ex_ret_ucode_ops                 #      2.4 %  retiring_fastpath      
+                                                  #      1.2 %  retiring_microcode       (0.00%)
+     5,994,979,456      ls_not_halted_cyc                                                       (0.00%)
+     1,268,650,072      ex_ret_ops                                                              (0.00%)
+     <not counted>      de_no_dispatch_per_slot.no_ops_from_frontend                                        (0.00%)
+     <not counted>      cpu/de_no_dispatch_per_slot.no_ops_from_frontend,cmask=0x6/                                        (0.00%)
+     <not counted>      ls_not_halted_cyc                                                       (0.00%)
+
+      20.000869059 seconds time elapsed
+
+Some events weren't counted. Try disabling the NMI watchdog:
+	echo 0 > /proc/sys/kernel/nmi_watchdog
+	perf stat ...
+	echo 1 > /proc/sys/kernel/nmi_watchdog

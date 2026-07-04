@@ -1,0 +1,2 @@
+io-uring: listening on http://0.0.0.0:31041
+loadgen: 60000 ok, 0 errors, throughput 2000.0 rps, p50 89µs p99 121µs p99.99 159µs max 330µs

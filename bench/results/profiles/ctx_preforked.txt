@@ -1,0 +1,5 @@
+# /proc/<pid>/task/*/status snapshots, summed across all threads.
+# Columns: voluntary_ctxt_switches nonvoluntary_ctxt_switches total
+before 4 1 5
+after  304 1 305
+delta  300 0 300

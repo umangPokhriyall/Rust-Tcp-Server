@@ -1,0 +1,2 @@
+model,rate,connections,throughput_rps,errors,p50,p90,p99,p999,p9999,max
+multireactor-w1,80000,1000,80000.0,0,67,77,87,107,202,293

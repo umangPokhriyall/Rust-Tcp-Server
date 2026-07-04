@@ -1,0 +1,2 @@
+preforked: 12 workers on http://0.0.0.0:20083
+loadgen: 510265 ok, 989735 errors, throughput 17008.8 rps, p50 60µs p99 83µs p99.99 187µs max 687µs

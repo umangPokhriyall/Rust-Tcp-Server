@@ -1,0 +1,2 @@
+multireactor: 32 reactors on http://0.0.0.0:19086 (cores=48)
+loadgen: 1200000 ok, 0 errors, throughput 80000.0 rps, p50 58µs p99 82µs p99.99 677µs max 3733µs

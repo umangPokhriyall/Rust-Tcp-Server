@@ -1,0 +1,2 @@
+thread-per-conn: listening on http://0.0.0.0:20084
+loadgen: 1500000 ok, 0 errors, throughput 50000.0 rps, p50 71µs p99 92µs p99.99 116µs max 946µs

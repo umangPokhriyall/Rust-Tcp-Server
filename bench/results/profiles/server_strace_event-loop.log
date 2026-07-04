@@ -1,0 +1,2 @@
+event-loop: listening on http://0.0.0.0:31032
+loadgen: 10000 ok, 0 errors, throughput 500.0 rps, p50 157µs p99 189µs p99.99 235µs max 418µs

@@ -1,0 +1,2 @@
+poll: listening on http://0.0.0.0:20086
+loadgen: 1500000 ok, 0 errors, throughput 50000.0 rps, p50 7231µs p99 9527µs p99.99 29679µs max 684031µs

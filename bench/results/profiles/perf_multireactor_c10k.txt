@@ -1,0 +1,26 @@
+# started on Sat Jul  4 10:33:10 2026
+
+
+ Performance counter stats for process id '1235547':
+
+       646,053,410      ex_ret_brn_misp                  #      0.4 %  bad_speculation_mispredicts
+                                                  #      0.0 %  bad_speculation_pipeline_restarts  (25.21%)
+    57,782,428,611      de_src_op_disp.all                                                      (25.21%)
+         1,649,576      resyncs_or_nc_redirects                                                 (25.21%)
+    61,931,425,192      ls_not_halted_cyc                                                       (25.21%)
+    56,179,836,348      ex_ret_ops                                                              (25.21%)
+    35,361,728,717      ex_no_retire.load_not_complete   #      3.1 %  backend_bound_cpu      
+                                                  #     20.3 %  backend_bound_memory     (25.12%)
+    87,627,025,471      de_no_dispatch_per_slot.backend_stalls                                        (25.12%)
+    40,730,458,226      ex_no_retire.not_complete                                               (25.12%)
+    62,555,267,119      ls_not_halted_cyc                                                       (25.12%)
+    10,902,613,533      ex_ret_ucode_ops                 #     12.2 %  retiring_fastpath      
+                                                  #      2.9 %  retiring_microcode       (24.87%)
+    63,270,989,270      ls_not_halted_cyc                                                       (24.87%)
+    57,394,076,725      ex_ret_ops                                                              (24.87%)
+   232,152,492,538      de_no_dispatch_per_slot.no_ops_from_frontend #     12.0 %  frontend_bound_bandwidth  (24.79%)
+    31,059,509,364      cpu/de_no_dispatch_per_slot.no_ops_from_frontend,cmask=0x6/ #     49.0 %  frontend_bound_latency   (24.79%)
+    63,348,644,568      ls_not_halted_cyc                                                       (24.79%)
+
+      20.001019250 seconds time elapsed
+

@@ -1,0 +1,2 @@
+epoll-et: listening on http://0.0.0.0:31028
+loadgen: 10000 ok, 0 errors, throughput 500.0 rps, p50 155µs p99 184µs p99.99 233µs max 257µs
