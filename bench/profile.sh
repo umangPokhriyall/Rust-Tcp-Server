@@ -61,10 +61,18 @@ export LOADGEN_STACK_KIB="${LOADGEN_STACK_KIB:-128}"
 # Optional NUMA pinning (Phase 3 §3). Unset = empty prefix, byte-identical.
 SERVER_NUMA=()
 LOADGEN_NUMA=()
-if [[ -n "${SERVER_NUMA_NODE:-}" ]]; then
+# Core-pin (SERVER_CPUS/LOADGEN_CPUS via --physcpubind) takes precedence over
+# node-pin (SERVER_NUMA_NODE). Required under NPS1: with one NUMA node, disjoint-
+# node isolation is impossible, so --physcpubind gives disjoint cores + disjoint
+# per-CCD L3 (memory interleaved — the documented NPS1 caveat).
+if [[ -n "${SERVER_CPUS:-}" ]]; then
+    SERVER_NUMA=(numactl --physcpubind="$SERVER_CPUS" --membind="${MEMBIND_NODE:-0}")
+elif [[ -n "${SERVER_NUMA_NODE:-}" ]]; then
     SERVER_NUMA=(numactl --cpunodebind="$SERVER_NUMA_NODE" --membind="$SERVER_NUMA_NODE")
 fi
-if [[ -n "${LOADGEN_NUMA_NODE:-}" ]]; then
+if [[ -n "${LOADGEN_CPUS:-}" ]]; then
+    LOADGEN_NUMA=(numactl --physcpubind="$LOADGEN_CPUS" --membind="${MEMBIND_NODE:-0}")
+elif [[ -n "${LOADGEN_NUMA_NODE:-}" ]]; then
     LOADGEN_NUMA=(numactl --cpunodebind="$LOADGEN_NUMA_NODE" --membind="$LOADGEN_NUMA_NODE")
 fi
 

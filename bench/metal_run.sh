@@ -37,8 +37,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export SERVER_NUMA_NODE="${SERVER_NUMA_NODE:-0}"
-export LOADGEN_NUMA_NODE="${LOADGEN_NUMA_NODE:-1}"
+# Pinning: prefer explicit core lists (SERVER_CPUS/LOADGEN_CPUS via --physcpubind,
+# e.g. under NPS1 where disjoint-node isolation is impossible); otherwise fall back
+# to NUMA-node pinning (SERVER_NUMA_NODE/LOADGEN_NUMA_NODE).
+if [[ -n "${SERVER_CPUS:-}" || -n "${LOADGEN_CPUS:-}" ]]; then
+    export SERVER_CPUS LOADGEN_CPUS MEMBIND_NODE="${MEMBIND_NODE:-0}"
+    PIN_DESC="server cpus=${SERVER_CPUS:-<unset>}  loadgen cpus=${LOADGEN_CPUS:-<unset>}  membind=${MEMBIND_NODE}"
+else
+    export SERVER_NUMA_NODE="${SERVER_NUMA_NODE:-0}"
+    export LOADGEN_NUMA_NODE="${LOADGEN_NUMA_NODE:-1}"
+    PIN_DESC="server node=$SERVER_NUMA_NODE  loadgen node=$LOADGEN_NUMA_NODE"
+fi
 C10K_CONNS="${C10K_CONNS:-10000}"
 C10K_RATE="${C10K_RATE:-50000}"
 RESULTS_DIR="${RESULTS_DIR:-bench/results}"
@@ -89,8 +98,8 @@ capture_rig() {
         cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo "n/a"
         echo; echo "## PERF_METRIC_GROUP"
         echo "${PERF_METRIC_GROUP:-<unset — perf pass will self-skip>}"
-        echo; echo "## NUMA pinning (sweep/c10k/profile)"
-        echo "server node=$SERVER_NUMA_NODE  loadgen node=$LOADGEN_NUMA_NODE"
+        echo; echo "## Pinning (sweep/c10k/profile)"
+        echo "$PIN_DESC"
     } >"$out"
     echo "wrote $out"
 }
@@ -104,14 +113,14 @@ capture_rig
 echo "=== metal_run: loopback sanity ==="
 ping -c 5 127.0.0.1 >/dev/null || echo "  (ping unavailable; continuing)"
 
-echo "=== metal_run: 11-model sweep (server node $SERVER_NUMA_NODE / loadgen node $LOADGEN_NUMA_NODE) ==="
+echo "=== metal_run: 11-model sweep ($PIN_DESC) ==="
 bash bench/run.sh
 
 echo "=== metal_run: true C10K (conns=$C10K_CONNS rate=$C10K_RATE) ==="
 C10K_CONNS="$C10K_CONNS" C10K_RATE="$C10K_RATE" bash bench/c10k.sh
 
 echo "=== metal_run: multireactor scaling grid (UNPINNED — full socket, auto-capped at nproc) ==="
-env -u SERVER_NUMA_NODE -u LOADGEN_NUMA_NODE bash bench/scaling.sh
+env -u SERVER_NUMA_NODE -u LOADGEN_NUMA_NODE -u SERVER_CPUS -u LOADGEN_CPUS bash bench/scaling.sh
 
 echo "=== metal_run: vendor-aware profiling pass (all 11 models) ==="
 bash bench/profile.sh
@@ -127,7 +136,7 @@ else
     if git diff --cached --quiet; then
         echo "  no result changes to commit"
     else
-        git commit -m "phase3: definitive Latitude m4.metal.large run (EPYC, NPS2, AMD Zen4 pipeline analysis)"
+        git commit -m "phase3: definitive Latitude m4.metal.large run (EPYC 9254, AMD Zen4 pipeline analysis)"
         git push || echo "  git push failed (no remote / no auth?) — results are committed locally"
     fi
 fi
