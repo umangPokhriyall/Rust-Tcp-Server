@@ -221,7 +221,8 @@ Each decision states the alternative it rejected and the tradeoff accepted.
   work-stealing, so skewed connection lifetimes can imbalance reactors
   (`docs/BENCHMARKS.md` §7, the `multireactor` caveat) — accepted because the
   benchmark confirms zero shared-state contention and the best C10K median of any
-  model, p50 = 86 µs (`bench/results/c10k_multireactor.csv`).
+  model, p50 = 70 µs (`bench/results/c10k_multireactor.csv`), at 1.002
+  ctx-switches/req on disjoint cores (`bench/results/profiles/summary.csv`).
 
 - **`Vec` header store over `HashMap`.** *Rejected:* a `HashMap` keyed by header
   name. *Reason:* requests carry a handful of headers; a small linear-scanned
@@ -233,8 +234,8 @@ Each decision states the alternative it rejected and the tradeoff accepted.
   posting a freshly allocated buffer with each read SQE. *Reason:* a provided
   buffer ring lets the kernel select the read buffer and report it in the CQE,
   which — with multishot accept — removes the per-accept and per-read submission
-  syscalls and is what drives `io_uring` to 2.015 syscalls/req against
-  epoll-et's 4.024 (`bench/results/profiles/summary.csv`). *Tradeoff accepted:*
+  syscalls and is what drives `io_uring` to 2.021 syscalls/req against
+  epoll-et's 4.028 (`bench/results/profiles/summary.csv`). *Tradeoff accepted:*
   ring/buffer bookkeeping and tighter coupling to the kernel ABI, in exchange for
   the syscall-elimination the model exists to demonstrate.
 
@@ -242,10 +243,14 @@ Each decision states the alternative it rejected and the tradeoff accepted.
   multi-ring `io_uring` (the production form). *Reason:* a single ring on a
   single thread isolates syscall-elimination from core count, making the fair
   comparison single-ring `io_uring` vs single-thread `epoll-et`. *Tradeoff
-  accepted:* this `io_uring` sheds load above C≈1000 and does not lead absolute
-  throughput — `multireactor` does, on N cores (`docs/BENCHMARKS.md` §8) — but
-  the syscall result it isolates holds on the apples-to-apples axis. Multi-ring
-  `io_uring` is noted as future work, not built.
+  accepted:* this `io_uring` uses one core, so absolute-throughput leadership
+  belongs to `multireactor` on N cores (`docs/BENCHMARKS.md` §8). On EPYC the
+  single ring sustains a true C10K without shedding, but the AMD Zen4 pipeline
+  data shows its halved syscall count does not out-execute epoll-ET (0.76 vs 1.20
+  retired ops/cyc at C10K, `bench/results/profiles/perf_io-uring_c10k.txt`) — the
+  syscall result it isolates holds on the apples-to-apples axis; the pipeline win
+  does not follow on this frontend-latency-bound workload. Multi-ring `io_uring`
+  is noted as future work, not built.
 
 - **Bounded inputs enforced in the parser.** *Rejected:* trusting client input
   sizes. *Reason:* every ceiling in `limits.rs` (request-line, header, body,
