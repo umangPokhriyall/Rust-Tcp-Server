@@ -1,4 +1,4 @@
-# Phase 2 §7 — Profiling deep-dive
+# Profiling deep-dive (archived laptop run)
 
 Telemetry for the three signal models — `epoll-et` (single-thread),
 `multireactor` (default workers), and `io-uring` (single ring,
@@ -51,7 +51,7 @@ listener is up and again immediately before SIGINT. Loadgen drives
 
 ### Top-down microarchitecture — unavailable on this host
 
-`docs/specs/phase2-spec.md` §7 requests `perf stat` top-down
+The methodology calls for `perf stat` top-down
 (retiring / bad-spec / frontend-bound / backend-bound). `perf` cannot
 open any event on this kernel:
 
@@ -125,7 +125,7 @@ each read CQE, so reads need no per-op setup. What remains in the hot
 path is `io_uring_enter` — once to deliver SQEs and reap CQEs for the
 read side, once for the write side. 2.0 enters per request is the
 purpose-built minimum on this workload, and it is the exact mechanism
-that `phase2-spec.md` §5 asks for.
+that the io_uring comparison requires.
 
 ## Context-switches per request
 

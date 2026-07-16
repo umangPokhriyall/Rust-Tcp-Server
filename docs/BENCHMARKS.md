@@ -30,7 +30,7 @@ hidden.
 
 This SKU is a Latitude.sh `m4.metal.large`: it can be rented hourly, self-serve,
 and re-run bit-for-bit — **anyone can rent this exact SKU by the hour and
-reproduce every number in this document.** The run of record is git `c76a1bc`,
+reproduce every number in this document.** The run of record is git `bf67267`,
 captured `2026-07-04` (`bench/results/rig.txt`).
 
 **Server/loadgen isolation (NPS1 core-pinning).** The box provisioned as **NPS1**
@@ -44,8 +44,8 @@ per-CCD L3** — each CCD owns its 32 MiB L3, true even within one NUMA node —
 server and loadgen never share a core or an L3. The one isolation NPS1 does not
 provide is a disjoint memory controller: with a single NUMA node, DRAM traffic is
 interleaved across the socket's channels rather than split. This is the
-documented NPS1 caveat (`docs/specs/phase3-spec.md` §3); per-CCD L3 isolation
-holds, the memory-controller split is coarser.
+documented NPS1 caveat; per-CCD L3 isolation holds, the memory-controller
+split is coarser.
 
 **Prior baseline.** An earlier run of this identical suite on an 11th Gen Intel
 Core i5-1135G7 laptop (4 cores / 8 threads, 8 GiB, no PMU) is archived under
@@ -321,7 +321,7 @@ fixed concurrency 1000 / offered 80,000 rps
 The throughput scaling factor (`throughput@N ÷ throughput@1`) is **flat at 1.0×**,
 and — unlike the archived laptop, where one reactor saturated at p50 = 376 ms — a
 single pinned Zen4 core already absorbs the full 80,000 rps at **p50 = 67 µs**
-(`bench/results/multireactor_scaling.csv`). The honest reading: 80,000 rps is
+(`bench/results/multireactor_scaling.csv`). The correct reading: 80,000 rps is
 below the saturation point of even one EPYC reactor, so this fixed-rate sweep does
 not expose a throughput knee; adding reactors trims the median only marginally
 (67 → 56 µs at 8 workers) and holds flat thereafter. Worker counts 32 and 48
@@ -445,8 +445,7 @@ eleven models now carry a syscalls/req, ctx-switches/req
 > against the lowest syscall count of any readiness model.
 
 > **event-loop.** The same epoll-ET mechanism behind a reusable reactor
-> abstraction with explicit buffer management — the direct microVM-multiplexer
-> ancestor. At C=100 it serves 20,000 req/s (p99 = 94 µs, identical to epoll-et)
+> abstraction with explicit buffer management. At C=100 it serves 20,000 req/s (p99 = 94 µs, identical to epoll-et)
 > [`bench/results/event-loop.csv`]; at C=10000 it carries all 10,000 at 50,000 rps
 > with 0 errors, p50 = 98 µs, p99 = 148 µs [`bench/results/c10k_event-loop.csv`].
 > Profile: 4.027 syscalls/req, 1.002 ctx-switches/req, and a pipeline profile
@@ -471,7 +470,7 @@ eleven models now carry a syscalls/req, ctx-switches/req
 > `bench/results/profiles/strace_multireactor.txt`]. Under C10K load, 15.1%
 > retiring, 0.91 ops/cyc [`bench/results/profiles/perf_multireactor_c10k.txt`]. It
 > breaks under skewed connection lifetimes — kernel-hash balancing has no
-> work-stealing (`phase2-spec.md` §4). It represents the tradeoff of near-linear
+> work-stealing. It represents the tradeoff of near-linear
 > multicore scaling with zero shared state against load-imbalance under skew.
 
 > **io-uring.** Completion-based, purpose-built: a single ring on a single thread,
@@ -539,7 +538,7 @@ syscall-bound.** Absolute-throughput leadership still belongs to `multireactor`,
 which uses all N cores while this `io_uring` uses one; comparing 1-core io_uring
 to N-core multireactor would be a category error. The production form —
 thread-per-core, multi-ring — is the path to competing on absolute throughput and
-is noted as future work in `phase2-spec.md` §5; it was deliberately not built, so
+is left as future work; it was deliberately not built, so
 the single-ring number isolates the syscall mechanism.
 
 ## 9. C10K — resource curves and failure points
@@ -600,7 +599,7 @@ each with its number.
 
 - **multireactor's ctx-switches/req fell to ~1.0, as predicted.** The laptop
   reported 1.153 and attributed it to 8 pinned reactors sharing 8 cores with the
-  loadgen. Phase 3 predicted that on disjoint cores it would fall toward 1.0. It
+  loadgen. The prediction was that on disjoint cores it would fall toward 1.0. It
   did: **1.002** [`bench/results/profiles/summary.csv`], identical to single-thread
   `epoll-et` (1.002) and `io-uring` (1.002). Predicted, then confirmed — the
   laptop figure was a co-residency confound, not a model cost.
@@ -669,29 +668,3 @@ Every headline claim and figure maps to a committed file under `bench/results/`.
 | host CPU / RAM / kernel / microcode / governor / NPS / pinning | `bench/results/rig.txt` |
 | C10K methodology and true-10000 justification | `bench/results/c10k_README.md` |
 | AMD pipeline methodology and Zen4 event mapping | `bench/results/profiles/README.md` |
-
-## 12. The microVM bridge
-
-The shapes measured here are the control-plane primitives of an AI-agent sandbox
-host, not analogies to them. `multireactor` — acceptor-free, `SO_REUSEPORT`, one
-pinned reactor per core, shared-nothing — is the sandbox API control plane: each
-core owns a slice of the incoming connection space with no cross-core lock on the
-hot path, which is exactly how a sandbox host accepts and dispatches
-guest-management connections without a shared accept bottleneck. On disjoint
-Zen4 cores this is not just structural but measured: 1.002 ctx-switches/req and
-per-reactor syscall parity with single-thread epoll-ET
-(`bench/results/profiles/summary.csv`). The epoll-ET / io_uring loop inside each
-reactor is the host↔guest I/O multiplexer: one readiness- or completion-driven
-loop carrying thousands of live channels on one thread, which the C10K result
-shows costs ≈ 1.1 KiB of state per connection rather than a thread (§9).
-
-The frozen `core::Connection` is the sandbox lifecycle state machine — one sans-IO
-`Reading → Writing → KeepAlive/Close` machine that this benchmark drove unmodified
-under blocking I/O, epoll readiness, and io_uring completion alike, so the same
-lifecycle logic survives an I/O-substrate change the way a sandbox's guest-state
-logic must survive a transport change. The disciplines this teardown measured —
-correctness when one client misbehaves (the §4 common bar) and backpressure under
-overload (the bounded `thread-pool` and `preforked` shedding load as errors rather
-than growing without bound, §9) — are the orchestrator disciplines a sandbox host
-needs when a guest hangs or floods. The benchmark is a rehearsal of that control
-plane on a server workload where every claim is measurable.

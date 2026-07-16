@@ -2,7 +2,7 @@
 
 This directory's `c10k_*` files are the C10K resource-curve and served-latency
 capture produced by `bench/c10k.sh` on the AMD EPYC 9254 run of record
-(`bench/results/rig.txt`, git `c76a1bc`). Every number here is from that run.
+(`bench/results/rig.txt`, git `bf67267`). Every number here is from that run.
 
 ## What was measured
 

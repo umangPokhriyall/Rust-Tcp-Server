@@ -1,6 +1,6 @@
 # bench/results/c10k_README.md — C10K resource curves
 
-This directory holds the Phase 2 §6 C10K capture: each model driven at a
+This directory holds the archived laptop C10K capture: each model driven at a
 fixed concurrency for `DURATION` seconds while the harness samples
 `/proc/<pid>/status` (VmRSS, voluntary/involuntary context switches) and
 the live fd count every `SAMPLE_INTERVAL` seconds.
@@ -29,7 +29,7 @@ kernel behaviour for every other process on the box, so we don't.
 
 The highest concurrency that fits is 8000 — this is what `bench/c10k.sh`
 drives. The c=10000 rung of the sweep CSVs (`<model>.csv`) records this
-honestly via two distinct sentinels in the `errors` column:
+via two distinct sentinels in the `errors` column:
 
   * `errors=-1` — harness-side saturation (point exceeded the
                   `POINT_BUDGET` wall clock; loadgen never completed).
@@ -51,7 +51,7 @@ explains it.
 default would cap single-reactor models at 1024 active connections —
 inflating their "RSS flat" verdict but obscuring whether the model can
 actually carry 8000 connections. `bench/c10k.sh` therefore passes
-`--max-connections 16384` to the server (new in Phase 2; see
+`--max-connections 16384` to the server (see
 `server/src/main.rs --max-connections`). `multireactor` ignores the cap
 in the obvious way: each of its N reactors enforces it independently,
 giving N × max_connections total capacity.

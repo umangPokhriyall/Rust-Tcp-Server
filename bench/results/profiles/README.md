@@ -1,7 +1,7 @@
 # Profiling — syscalls/req, ctx-switches/req, AMD Zen4 pipeline utilization
 
 This directory holds the profiling passes produced by `bench/profile.sh` on the
-AMD EPYC 9254 run of record (`bench/results/rig.txt`, git `c76a1bc`). Three
+AMD EPYC 9254 run of record (`bench/results/rig.txt`, git `bf67267`). Three
 independent passes are captured for all eleven models; the pipeline pass gets a
 second capture under 10,000-connection load for the signal models (`epoll-et`,
 `multireactor`, `io-uring`).

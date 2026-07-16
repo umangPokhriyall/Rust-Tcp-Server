@@ -2,8 +2,8 @@
 
 Eleven TCP server concurrency models — from an `accept()`-in-a-loop to a
 purpose-built `io_uring` completion engine — implemented behind one `Server`
-trait and one frozen sans-IO `core::Connection` state machine, then benchmarked
-honestly with an open-loop, coordinated-omission-corrected load generator on
+trait and one frozen sans-IO `core::Connection` state machine, benchmarked
+with an open-loop, coordinated-omission-corrected load generator on
 AMD EPYC bare metal.
 
 ## Headline result
@@ -30,7 +30,7 @@ syscall-bound (full analysis in [docs/BENCHMARKS.md](docs/BENCHMARKS.md) §8, §
 
 | Path | Role |
 |---|---|
-| `core/` | Sans-IO protocol library: HTTP parser, response encoder, trie router, in-memory asset cache, and the `Connection` state machine. Never touches a socket. Frozen since Phase 0. |
+| `core/` | Sans-IO protocol library: HTTP parser, response encoder, trie router, in-memory asset cache, and the `Connection` state machine. Never touches a socket. Frozen. |
 | `server/src/sys/` | Raw OS I/O: thin `libc` wrappers for sockets, `poll`, `epoll`, CPU affinity, signals, the connection table. Every syscall in the project lives here. |
 | `server/src/reactor.rs` | The event-loop assembly: an epoll-ET readiness loop over a connection table, reused unchanged by the single-thread event-loop model and by each `multireactor` worker. |
 | `server/src/models/` | The eleven concurrency strategies, one module each, every one implementing `core::Server`. |
@@ -80,15 +80,6 @@ models.
 | multireactor | Shared-nothing pinned reactors, `SO_REUSEPORT`, no acceptor | 50000 req/s at C10K, 0 errors, best median p50=70 µs (`c10k_multireactor.csv`) | Load imbalance under skewed lifetimes; no work-stealing |
 | io-uring | Single-ring completion engine: multishot accept, provided buffers | 50000 req/s at C10K, 0 errors (`c10k_io-uring.csv`); 2.021 syscalls/req | Single-thread completion path; syscall win doesn't beat epoll-ET's pipeline |
 
-## Why this exists
-
-The shapes measured here are the control-plane primitives of an AI-agent sandbox
-host: `multireactor` is the acceptor-free, `SO_REUSEPORT`, one-reactor-per-core
-API control plane; the epoll-ET / `io_uring` loop is the host↔guest I/O
-multiplexer; the frozen `core::Connection` is the guest lifecycle state machine
-that survives an I/O-substrate change unmodified. The benchmark is a rehearsal of
-that control plane on a workload where every claim is measurable.
-
 ## Build & run
 
 ```
@@ -120,7 +111,7 @@ GiB, `Linux 6.8.0-124-generic` (Ubuntu 24.04 LTS), `amd-pstate` performance
 governor, loopback only (`bench/results/rig.txt`). The box provisioned as NPS1
 (one NUMA node), so server and loadgen are isolated by core-pinning to disjoint
 CCDs (server CPUs 0–11, loadgen 12–23) — disjoint cores and disjoint private L3,
-memory interleaved. **Anyone can rent this exact SKU by the hour and re-run.** The
+memory interleaved. The
 full environment, methodology, and threats to validity are in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md) §2–§3.
 

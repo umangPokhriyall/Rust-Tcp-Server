@@ -38,7 +38,7 @@ line above which no code touches a socket.
    nothing below touches a socket       ▼
    core/                ┌──────────────────────────────────────────────┐
    (sans-IO protocol)   │  http::{request,response}  router  asset  app  │
-   FROZEN since Phase 0 │  Connection (state machine) + ConnAction       │
+   FROZEN               │  Connection (state machine) + ConnAction       │
                         │  Server trait, ServerConfig, bind_listener     │
                         └──────────────────────────────────────────────┘
 ```
@@ -59,8 +59,8 @@ strategy and reuses everything beneath it. No layer reaches upward.
   ceilings (`limits`), and atomic metrics (`metrics`).
 - **Must never:** call `read`, `write`, `accept`, `epoll`, or any other
   per-connection syscall. It operates only on byte buffers in memory and the
-  monotonic clock (for deadlines). It is **frozen** — byte-for-byte unchanged
-  since Phase 0.
+  monotonic clock (for deadlines). It is **frozen** — its public contract and behavior
+  do not change.
 - **Public surface:** re-exported from `core::lib`. The model-facing pieces are
   `Connection`, `ConnAction`, `App`, `Server`, `ServerConfig`, and the
   setup-only helper `bind_listener`.
@@ -72,7 +72,7 @@ strategy and reuses everything beneath it. No layer reaches upward.
 
 ### `server/src/sys/` — raw OS I/O
 
-- **Owns:** thin, honest `libc` wrappers — `socket` (non-blocking sockets,
+- **Owns:** thin `libc` wrappers — `socket` (non-blocking sockets,
   `SO_REUSEPORT`), `poll`, `epoll` (level- and edge-triggered), `affinity` (CPU
   pinning), `signal` (SIGINT/SIGTERM shutdown), `conn_table` (fd→connection
   slab), and `syscall` (retry/`EINTR` helpers). Every syscall in the project
@@ -130,7 +130,7 @@ I/O, epoll readiness, and `io_uring` completion, unmodified
 ## 4. Evidence — one frozen core served all eleven models
 
 Every model below consumes the same unmodified `core::Connection`. `core` is
-byte-for-byte unchanged since Phase 0; the I/O mechanism column is the *only*
+byte-for-byte unchanged across all eleven models; the I/O mechanism column is the *only*
 axis that varies.
 
 | Model | I/O mechanism | Consumes unmodified `core::Connection`? |
